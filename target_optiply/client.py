@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 class OptiplySink(HotglueSink):
     """Optiply target sink class."""
 
-    base_url = os.environ.get("optiply_base_url", "https://api.acceptance.optiply.com/v1")
+    base_url = os.environ.get("optiply_base_url", "https://api-accept.optiply.com/v1")
     http_headers = {
         "Content-Type": "application/vnd.api+json",
         "Accept": "application/vnd.api+json",

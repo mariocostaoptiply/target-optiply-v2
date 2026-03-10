@@ -16,7 +16,7 @@ class OptiplyAuthenticator(Authenticator):
     def __init__(self, target, state: Dict[str, Any] = {}, auth_endpoint: Optional[str] = None) -> None:
         super().__init__(target, state)  # sets self._config, self._target, self._config_file_path, self.logger
         self._auth_endpoint = auth_endpoint or os.environ.get(
-            "optiply_dashboard_url", "https://dashboard.acceptance.optiply.com/api"
+            "optiply_dashboard_url", "https://dashboard-accept.optiply.com/api"
         ) + "/auth/oauth/token"
 
     @property

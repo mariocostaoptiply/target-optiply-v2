@@ -53,7 +53,7 @@ class BaseOptiplySink(OptiplySink):
         if self.unified_schema is not None:
             try:
                 validated = self.unified_schema.model_validate(record, strict=False)
-                attributes = validated.model_dump(exclude_none=True, exclude_unset=True)
+                attributes = validated.model_dump(exclude_none=True)
             except Exception as e:
                 self.logger.warning(f"Schema validation warning for {self.stream_name}: {e}")
                 attributes = self.build_attributes(record, self.field_mappings)
@@ -144,7 +144,6 @@ class BaseOptiplySink(OptiplySink):
             response_data = response.json() if http_method != "DELETE" else {}
             response_record_id = response_data.get("data", {}).get("id") or record_id or "unknown"
 
-            self.logger.info(f"{self.stream_name} {http_method} processed with id: {response_record_id}")
             return response_record_id, True, {
                 "_snapshot_row": {**original, "concat_attributes": concat},
                 "_action": "delete" if http_method == "DELETE" else "upsert",
