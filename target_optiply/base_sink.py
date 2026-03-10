@@ -184,7 +184,6 @@ class BaseOptiplySink(OptiplySink):
             return None, False, {"error": error_msg}
 
     def clean_up(self) -> None:
-        """Enrich SDK platform snapshot with our extra columns at stream end."""
         if self.write_etl_snapshot and self._etl_snapshot_cache:
             self._enrich_sdk_snapshot()
         super().clean_up()
@@ -200,23 +199,45 @@ class BaseOptiplySink(OptiplySink):
             path = os.path.join(SNAPSHOT_DIR, f"{self.stream_name}_{flow_id}.snapshot.csv")
             if os.path.isfile(path):
                 return path
-        # Fallback: glob for any matching file
-        matches = glob.glob(os.path.join(SNAPSHOT_DIR, f"{self.stream_name}_*.snapshot.csv"))
+        # Fallback: glob for SDK snapshot only (exclude enriched variant)
+        matches = [
+            p for p in glob.glob(os.path.join(SNAPSHOT_DIR, f"{self.stream_name}_*.snapshot.csv"))
+            if "_enriched_" not in os.path.basename(p)
+        ]
         return matches[0] if matches else None
 
     def _load_etl_snapshot(self) -> Dict[str, dict]:
-        """Load snapshot once per stream run, keyed by InputId (= externalId)."""
+        """Load snapshot once per stream run, keyed by InputId (= externalId).
+
+        Primary source: previous run's state bookmarks (persisted to S3 by SDK).
+        Fallback: SDK platform snapshot CSV (InputId/RemoteId only).
+        """
         if self._etl_snapshot_cache is not None:
             return self._etl_snapshot_cache
 
         cache: Dict[str, dict] = {}
-        path = self._find_sdk_snapshot_path()
-        if path:
-            with open(path, newline="", encoding="utf-8") as f:
-                for row in csv.DictReader(f):
-                    input_id = row.get("InputId", "")
-                    if input_id:
-                        cache[str(input_id)] = row
+
+        # Primary: read from previous state bookmarks (has concat_attributes)
+        bookmarks = self.latest_state.get("bookmarks", {}).get(self.name, [])
+        for entry in bookmarks:
+            external_id = str(entry.get("externalId", ""))
+            snapshot_row = entry.get("_snapshot_row")
+            if external_id and snapshot_row:
+                row = {k: ("" if v is None else str(v)) for k, v in snapshot_row.items()}
+                row["InputId"] = external_id
+                if entry.get("id"):
+                    row["RemoteId"] = str(entry["id"])
+                cache[external_id] = row
+
+        # Fallback: SDK platform snapshot CSV (no concat_attributes, but has RemoteId)
+        if not cache:
+            path = self._find_sdk_snapshot_path()
+            if path:
+                with open(path, newline="", encoding="utf-8") as f:
+                    for row in csv.DictReader(f):
+                        input_id = row.get("InputId", "")
+                        if input_id:
+                            cache[str(input_id)] = row
 
         self._etl_snapshot_cache = cache
         return cache
@@ -238,13 +259,17 @@ class BaseOptiplySink(OptiplySink):
             cache[external_id] = {**existing, **updated}
 
     def _enrich_sdk_snapshot(self) -> None:
-        """Write enriched SDK snapshot (InputId, RemoteId + our columns) to disk."""
+        """Write enriched ETL snapshot (InputId, RemoteId + all original fields + concat_attributes).
+
+        Written to a separate filename ({stream_name}_enriched_{flow_id}.snapshot.csv) so the
+        Hotglue executor cannot overwrite it when it regenerates the SDK snapshot after target exit.
+        """
         flow_id = os.environ.get("FLOW")
         if not flow_id:
-            self.logger.warning("FLOW env var not set — cannot write enriched SDK snapshot")
+            self.logger.warning("FLOW env var not set — cannot write enriched ETL snapshot")
             return
 
-        path = os.path.join(SNAPSHOT_DIR, f"{self.stream_name}_{flow_id}.snapshot.csv")
+        path = os.path.join(SNAPSHOT_DIR, f"{self.stream_name}_enriched_{flow_id}.snapshot.csv")
         Path(SNAPSHOT_DIR).mkdir(parents=True, exist_ok=True)
 
         cache = self._etl_snapshot_cache
@@ -262,7 +287,7 @@ class BaseOptiplySink(OptiplySink):
             writer.writeheader()
             writer.writerows(cache.values())
 
-        self.logger.info(f"SDK snapshot enriched: {path} ({len(cache)} rows)")
+        self.logger.info(f"ETL snapshot written: {path} ({len(cache)} rows)")
 
     def _compute_concat_attributes(self, attributes: dict) -> str:
         """Build a pipe-delimited string from API attributes, excluding configured fields."""
