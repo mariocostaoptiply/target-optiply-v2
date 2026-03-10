@@ -144,10 +144,14 @@ class BaseOptiplySink(OptiplySink):
             response_data = response.json() if http_method != "DELETE" else {}
             response_record_id = response_data.get("data", {}).get("id") or record_id or "unknown"
 
-            return response_record_id, True, {
+            state_updates = {
                 "_snapshot_row": {**original, "concat_attributes": concat},
                 "_action": "delete" if http_method == "DELETE" else "upsert",
             }
+            if http_method == "PATCH":
+                state_updates["is_updated"] = True
+
+            return response_record_id, True, state_updates
 
         except Exception as e:
             error_msg = f"Error processing record: {str(e)}"

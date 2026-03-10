@@ -12,7 +12,7 @@ license = "Apache-2.0"
 
 [tool.poetry.dependencies]
 python = ">=3.9,<3.11"
-target-hotglue = {git = "ssh://git@gitlab.com/hotglue/target-hotglue-sdk.git"}
+target-hotglue = {git = "https://gitlab.com/hotglue/target-hotglue-sdk.git"}
 requests = "^2.31.0"
 
 [tool.poetry.group.dev.dependencies]
