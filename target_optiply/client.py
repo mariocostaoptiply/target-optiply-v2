@@ -139,8 +139,6 @@ class OptiplySink(HotglueSink):
             if headers:
                 request_headers.update(headers)
 
-            self.logger.info(f"Request: {http_method} /{endpoint} | Payload: {request_data}")
-
             response = requests.request(
                 method=http_method,
                 url=url,
@@ -151,11 +149,9 @@ class OptiplySink(HotglueSink):
 
             if response.status_code >= 400:
                 error_msg = self._get_error_message(response.text, response.status_code, url)
-                self.logger.error(f"Request Status: {response.status_code} | Error: {error_msg}")
-                if response.status_code >= 500:
-                    self.logger.error(f"Request URL: {url} | Payload: {request_data}")
+                self.logger.error(f"Request: {http_method} /{endpoint} | Status: {response.status_code} | Error: {error_msg} | Payload: {request_data}")
             else:
-                self.logger.info(f"Request Status: {response.status_code}")
+                self.logger.info(f"Request: {http_method} /{endpoint} | Status: {response.status_code} | Payload: {request_data}")
 
             return response
 

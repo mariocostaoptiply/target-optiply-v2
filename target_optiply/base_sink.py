@@ -38,6 +38,9 @@ class BaseOptiplySink(OptiplySink):
         super().__init__(target, stream_name, schema, key_properties)
         self.endpoint = self.stream_name.lower() if not self.endpoint else self.endpoint
         self._etl_snapshot_cache: Optional[Dict[str, dict]] = None
+        self._record_count: int = 0
+        total_env = os.environ.get(f"STREAM_TOTAL_{stream_name.upper()}")
+        self._record_total: Optional[int] = int(total_env) if total_env else None
 
     def preprocess_record(self, record: dict, context: dict) -> dict:
         """Preprocess the record before sending to API."""
@@ -97,6 +100,8 @@ class BaseOptiplySink(OptiplySink):
             elif "id" in record:
                 record_id = record["id"]
 
+            self._record_count += 1
+
             if deleted_at and record_id:
                 http_method = "DELETE"
             elif record_id:
@@ -105,11 +110,15 @@ class BaseOptiplySink(OptiplySink):
                     snapshot = self._load_etl_snapshot()
                     existing = snapshot.get(str(external_id))
                     if existing and existing.get("concat_attributes") == concat:
-                        self.logger.info(f"{self.stream_name} SKIPPED (no changes): {external_id}")
+                        count_label = f"#{self._record_count}/{self._record_total}" if self._record_total else f"#{self._record_count}"
+                        self.logger.info(f"{self.stream_name} [{count_label}] SKIPPED (no changes): {external_id}")
                         return record_id, True, {"_action": "skip"}
                 http_method = "PATCH"
             else:
                 http_method = "POST"
+
+            count_label = f"#{self._record_count}/{self._record_total}" if self._record_total else f"#{self._record_count}"
+            self.logger.info(f"{self.stream_name} [{count_label}] {http_method} | externalId: {external_id}")
 
             if http_method == "POST":
                 mandatory_fields = self.get_mandatory_fields()
