@@ -48,7 +48,8 @@ class BaseOptiplySink(OptiplySink):
         # Note: externalId is popped by the SDK before this call; it will be
         # re-injected after and retrieved from upsert_record's record param.
         self._current_original = {
-            k: v for k, v in record.items()
+            k: v.isoformat() if isinstance(v, datetime) else v
+            for k, v in record.items()
             if not k.startswith("_sdc_") and k != "id"
         }
 
