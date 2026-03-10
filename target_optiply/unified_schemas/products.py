@@ -12,7 +12,7 @@ class ProductSchema(OptiplyBaseSchema):
     # Mandatory
     name: str
     stockLevel: float
-    unlimitedStock: bool
+    unlimitedStock: bool = False
 
     # Optional
     skuCode: Optional[str] = None

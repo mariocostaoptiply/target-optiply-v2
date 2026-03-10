@@ -34,10 +34,12 @@ class BaseOptiplySink(OptiplySink):
     snapshot_name: Optional[str] = None
     # Set to True on a sink to enable ETL snapshot writing in clean_up()
     write_etl_snapshot: bool = False
+    concat_exclude_fields: tuple = ()
 
     def __init__(self, target: PluginBase, stream_name: str, schema: Dict, key_properties: List[str]):
         super().__init__(target, stream_name, schema, key_properties)
         self.endpoint = self.stream_name.lower() if not self.endpoint else self.endpoint
+        self._etl_snapshot_cache: Optional[Dict[str, dict]] = None
 
     def preprocess_record(self, record: dict, context: dict) -> dict:
         """Preprocess the record before sending to API."""
@@ -62,6 +64,9 @@ class BaseOptiplySink(OptiplySink):
 
         self._add_additional_attributes(record, attributes)
 
+        # Compute concat_attributes from API-bound fields, excluding datetimes
+        self._current_concat = self._compute_concat_attributes(attributes)
+
         payload = {
             "data": {
                 "type": self.endpoint,
@@ -82,6 +87,8 @@ class BaseOptiplySink(OptiplySink):
         if external_id:
             original["externalId"] = external_id
 
+        concat = getattr(self, "_current_concat", "")
+
         # Check for delete signal
         deleted_at = record.get("_sdc_deleted_at") or original.get("deleted_at")
 
@@ -95,6 +102,13 @@ class BaseOptiplySink(OptiplySink):
             if deleted_at and record_id:
                 http_method = "DELETE"
             elif record_id:
+                # PATCH — check concat_attributes to skip if unchanged
+                if self.write_etl_snapshot and external_id:
+                    snapshot = self._load_etl_snapshot()
+                    existing = snapshot.get(str(external_id))
+                    if existing and existing.get("concat_attributes") == concat:
+                        self.logger.info(f"{self.stream_name} SKIPPED (no changes): {external_id}")
+                        return record_id, True, {"_action": "skip"}
                 http_method = "PATCH"
             else:
                 http_method = "POST"
@@ -134,7 +148,7 @@ class BaseOptiplySink(OptiplySink):
 
             self.logger.info(f"{self.stream_name} {http_method} processed with id: {response_record_id}")
             return response_record_id, True, {
-                "_snapshot_row": original,
+                "_snapshot_row": {**original, "concat_attributes": concat},
                 "_action": "delete" if http_method == "DELETE" else "upsert",
             }
 
@@ -167,7 +181,7 @@ class BaseOptiplySink(OptiplySink):
         super().clean_up()
 
     def _update_etl_snapshot(self, upsert_rows: List[dict], delete_rows: List[dict]) -> None:
-        """Upsert/delete rows in the ETL snapshot CSV (mirrors tools.py snapshot_records)."""
+        """Upsert/delete rows in the ETL snapshot CSV."""
         name = self.snapshot_name or self.name.lower()
         path = os.path.join(SNAPSHOT_DIR, f"{name}.snapshot.csv")
         Path(SNAPSHOT_DIR).mkdir(parents=True, exist_ok=True)
@@ -184,7 +198,7 @@ class BaseOptiplySink(OptiplySink):
             remote_id = str(row.get("externalId") or row.get("remoteId") or "")
             existing.pop(remote_id, None)
 
-        # Apply upserts — map externalId → remoteId, drop id (optiply_id not stored here)
+        # Apply upserts — map externalId → remoteId
         for row in upsert_rows:
             remote_id = str(row.get("externalId") or row.get("remoteId") or "")
             if not remote_id:
@@ -210,6 +224,31 @@ class BaseOptiplySink(OptiplySink):
             writer.writerows(existing.values())
 
         self.logger.info(f"ETL snapshot updated: {path} ({len(existing)} rows)")
+
+    def _load_etl_snapshot(self) -> Dict[str, dict]:
+        """Load the ETL snapshot once per stream run, keyed by remoteId."""
+        if self._etl_snapshot_cache is not None:
+            return self._etl_snapshot_cache
+
+        name = self.snapshot_name or self.name.lower()
+        path = os.path.join(SNAPSHOT_DIR, f"{name}.snapshot.csv")
+        cache: Dict[str, dict] = {}
+        if os.path.isfile(path):
+            with open(path, newline="", encoding="utf-8") as f:
+                for row in csv.DictReader(f):
+                    cache[row["remoteId"]] = row
+
+        self._etl_snapshot_cache = cache
+        return cache
+
+    def _compute_concat_attributes(self, attributes: dict) -> str:
+        """Build a pipe-delimited string from API attributes, excluding configured fields."""
+        values = []
+        for k in sorted(attributes.keys()):
+            if k in self.concat_exclude_fields:
+                continue
+            values.append(str(attributes[k]))
+        return "|".join(values)
 
     def build_attributes(self, record: Dict, field_mappings: Dict[str, str]) -> Dict:
         attributes = {}

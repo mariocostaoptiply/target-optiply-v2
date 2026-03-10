@@ -23,13 +23,14 @@ class ProductsSink(BaseOptiplySink):
     snapshot_name = "products"
     write_etl_snapshot = True
     unified_schema = ProductSchema
+    concat_exclude_fields = ("updatedAt", "createdAtRemote", "deletedAt")
 
     @property
     def name(self) -> str:
         return "Products"
 
     def get_mandatory_fields(self) -> List[str]:
-        return ["name", "stockLevel", "unlimitedStock"]
+        return ["name", "stockLevel"]
 
 
 class SupplierSink(BaseOptiplySink):
