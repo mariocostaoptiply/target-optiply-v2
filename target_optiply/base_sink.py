@@ -39,8 +39,14 @@ class BaseOptiplySink(OptiplySink):
         self.endpoint = self.stream_name.lower() if not self.endpoint else self.endpoint
         self._etl_snapshot_cache: Optional[Dict[str, dict]] = None
         self._record_count: int = 0
+        self._stashed_external_id = None
         total_env = os.environ.get(f"STREAM_TOTAL_{stream_name.upper()}")
         self._record_total: Optional[int] = int(total_env) if total_env else None
+
+    def process_record(self, record: dict, context: dict) -> None:
+        """Stash externalId before the SDK pops it, then delegate."""
+        self._stashed_external_id = record.get("externalId")
+        super().process_record(record, context)
 
     def preprocess_record(self, record: dict, context: dict) -> dict:
         """Preprocess the record before sending to API."""
@@ -83,8 +89,8 @@ class BaseOptiplySink(OptiplySink):
 
     def upsert_record(self, record: dict, context: dict) -> tuple:
         """Process the record and return (id, success, state_updates)."""
-        # externalId is re-injected by the SDK after preprocess_record
-        external_id = record.get("externalId")
+        # externalId is double-popped by the SDK; stashed in process_record override
+        external_id = record.get("externalId") or self._stashed_external_id
         original = {**getattr(self, "_current_original", {})}
         if external_id:
             original["externalId"] = external_id
