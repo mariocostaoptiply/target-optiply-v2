@@ -18,10 +18,8 @@ from target_optiply.client import OptiplySink
 
 logger = logging.getLogger(__name__)
 
-_job_id = os.environ.get("JOB_ID")
-SNAPSHOT_DIR = os.environ.get("SNAPSHOT_DIR") or (
-    f"/home/hotglue/{_job_id}/snapshots" if _job_id else ".secrets/snapshots"
-)
+_root_dir = os.environ.get("ROOT_DIR", ".")
+SNAPSHOT_DIR = os.environ.get("SNAPSHOT_DIR") or f"{_root_dir}/snapshots"
 
 
 class BaseOptiplySink(OptiplySink):
