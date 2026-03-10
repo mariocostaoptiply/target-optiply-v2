@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import glob
 import json
 import logging
 import os
@@ -28,9 +29,7 @@ class BaseOptiplySink(OptiplySink):
     endpoint = None
     field_mappings = {}
     unified_schema: Optional[Type[BaseModel]] = None
-    # Override per sink to match ETL snapshot filename (e.g. "supplier_products")
-    snapshot_name: Optional[str] = None
-    # Set to True on a sink to enable ETL snapshot writing in clean_up()
+    # Set to True on a sink to enable ETL snapshot enrichment in clean_up()
     write_etl_snapshot: bool = False
     concat_exclude_fields: tuple = ()
 
@@ -160,8 +159,18 @@ class BaseOptiplySink(OptiplySink):
             response_data = response.json() if http_method != "DELETE" else {}
             response_record_id = response_data.get("data", {}).get("id") or record_id or "unknown"
 
+            snapshot_row = {**original, "concat_attributes": concat}
+
+            if self.write_etl_snapshot:
+                self._update_snapshot_cache(
+                    external_id=str(external_id) if external_id else None,
+                    remote_id=str(response_record_id),
+                    row=snapshot_row,
+                    action="delete" if http_method == "DELETE" else "upsert",
+                )
+
             state_updates = {
-                "_snapshot_row": {**original, "concat_attributes": concat},
+                "_snapshot_row": snapshot_row,
                 "_action": "delete" if http_method == "DELETE" else "upsert",
             }
             if http_method == "PATCH":
@@ -175,62 +184,75 @@ class BaseOptiplySink(OptiplySink):
             return None, False, {"error": error_msg}
 
     def clean_up(self) -> None:
-        """Write ETL snapshot after stream completes — only confirmed successes."""
-        if not self.write_etl_snapshot:
-            super().clean_up()
-            return
-
-        bookmarks = self.latest_state.get("bookmarks", {}).get(self.name, [])
-
-        upsert_rows = []
-        delete_rows = []
-        for entry in bookmarks:
-            if not entry.get("success") or not entry.get("_snapshot_row"):
-                continue
-            if entry.get("_action") == "delete":
-                delete_rows.append(entry["_snapshot_row"])
-            else:
-                upsert_rows.append(entry["_snapshot_row"])
-
-        if upsert_rows or delete_rows:
-            self._update_etl_snapshot(upsert_rows, delete_rows)
-
+        """Enrich SDK platform snapshot with our extra columns at stream end."""
+        if self.write_etl_snapshot and self._etl_snapshot_cache:
+            self._enrich_sdk_snapshot()
         super().clean_up()
 
-    def _update_etl_snapshot(self, upsert_rows: List[dict], delete_rows: List[dict]) -> None:
-        """Upsert/delete rows in the ETL snapshot CSV."""
-        name = self.snapshot_name or self.name.lower()
-        path = os.path.join(SNAPSHOT_DIR, f"{name}.snapshot.csv")
-        Path(SNAPSHOT_DIR).mkdir(parents=True, exist_ok=True)
+    # -------------------------------------------------------------------------
+    # Snapshot helpers
+    # -------------------------------------------------------------------------
 
-        # Read existing snapshot keyed by remoteId
-        existing: Dict[str, dict] = {}
-        if os.path.isfile(path):
+    def _find_sdk_snapshot_path(self) -> Optional[str]:
+        """Find the SDK platform snapshot file for this stream."""
+        flow_id = os.environ.get("FLOW")
+        if flow_id:
+            path = os.path.join(SNAPSHOT_DIR, f"{self.stream_name}_{flow_id}.snapshot.csv")
+            if os.path.isfile(path):
+                return path
+        # Fallback: glob for any matching file
+        matches = glob.glob(os.path.join(SNAPSHOT_DIR, f"{self.stream_name}_*.snapshot.csv"))
+        return matches[0] if matches else None
+
+    def _load_etl_snapshot(self) -> Dict[str, dict]:
+        """Load snapshot once per stream run, keyed by InputId (= externalId)."""
+        if self._etl_snapshot_cache is not None:
+            return self._etl_snapshot_cache
+
+        cache: Dict[str, dict] = {}
+        path = self._find_sdk_snapshot_path()
+        if path:
             with open(path, newline="", encoding="utf-8") as f:
                 for row in csv.DictReader(f):
-                    existing[row["remoteId"]] = row
+                    input_id = row.get("InputId", "")
+                    if input_id:
+                        cache[str(input_id)] = row
 
-        # Apply deletes
-        for row in delete_rows:
-            remote_id = str(row.get("externalId") or row.get("remoteId") or "")
-            existing.pop(remote_id, None)
+        self._etl_snapshot_cache = cache
+        return cache
 
-        # Apply upserts — map externalId → remoteId
-        for row in upsert_rows:
-            remote_id = str(row.get("externalId") or row.get("remoteId") or "")
-            if not remote_id:
-                continue
-            snapshot_row = {k: ("" if v is None else str(v)) for k, v in row.items()
-                            if k not in ("externalId", "id")}
-            snapshot_row["remoteId"] = remote_id
-            existing[remote_id] = snapshot_row
-
-        if not existing:
+    def _update_snapshot_cache(self, external_id: Optional[str], remote_id: str, row: dict, action: str) -> None:
+        """Update the in-memory snapshot cache after each successful API call."""
+        cache = self._load_etl_snapshot()
+        if not external_id:
             return
 
-        # Collect all fieldnames preserving remoteId first
-        all_fields: List[str] = ["remoteId"]
-        for row in existing.values():
+        if action == "delete":
+            cache.pop(external_id, None)
+        else:
+            existing = cache.get(external_id, {})
+            updated = {k: ("" if v is None else str(v)) for k, v in row.items() if k != "id"}
+            updated["InputId"] = external_id
+            updated["RemoteId"] = remote_id
+            # Preserve any existing columns we didn't touch
+            cache[external_id] = {**existing, **updated}
+
+    def _enrich_sdk_snapshot(self) -> None:
+        """Write enriched SDK snapshot (InputId, RemoteId + our columns) to disk."""
+        flow_id = os.environ.get("FLOW")
+        if not flow_id:
+            self.logger.warning("FLOW env var not set — cannot write enriched SDK snapshot")
+            return
+
+        path = os.path.join(SNAPSHOT_DIR, f"{self.stream_name}_{flow_id}.snapshot.csv")
+        Path(SNAPSHOT_DIR).mkdir(parents=True, exist_ok=True)
+
+        cache = self._etl_snapshot_cache
+        if not cache:
+            return
+
+        all_fields: List[str] = ["InputId", "RemoteId"]
+        for row in cache.values():
             for k in row:
                 if k not in all_fields:
                     all_fields.append(k)
@@ -238,25 +260,9 @@ class BaseOptiplySink(OptiplySink):
         with open(path, "w", newline="", encoding="utf-8") as f:
             writer = csv.DictWriter(f, fieldnames=all_fields, extrasaction="ignore", restval="")
             writer.writeheader()
-            writer.writerows(existing.values())
+            writer.writerows(cache.values())
 
-        self.logger.info(f"ETL snapshot updated: {path} ({len(existing)} rows)")
-
-    def _load_etl_snapshot(self) -> Dict[str, dict]:
-        """Load the ETL snapshot once per stream run, keyed by remoteId."""
-        if self._etl_snapshot_cache is not None:
-            return self._etl_snapshot_cache
-
-        name = self.snapshot_name or self.name.lower()
-        path = os.path.join(SNAPSHOT_DIR, f"{name}.snapshot.csv")
-        cache: Dict[str, dict] = {}
-        if os.path.isfile(path):
-            with open(path, newline="", encoding="utf-8") as f:
-                for row in csv.DictReader(f):
-                    cache[row["remoteId"]] = row
-
-        self._etl_snapshot_cache = cache
-        return cache
+        self.logger.info(f"SDK snapshot enriched: {path} ({len(cache)} rows)")
 
     def _compute_concat_attributes(self, attributes: dict) -> str:
         """Build a pipe-delimited string from API attributes, excluding configured fields."""

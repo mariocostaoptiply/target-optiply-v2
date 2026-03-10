@@ -20,7 +20,6 @@ class ProductsSink(BaseOptiplySink):
     """Products sink."""
 
     endpoint = "products"
-    snapshot_name = "products"
     write_etl_snapshot = True
     unified_schema = ProductSchema
     concat_exclude_fields = ("updatedAt", "createdAtRemote", "deletedAt")
