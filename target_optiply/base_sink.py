@@ -82,7 +82,7 @@ class BaseOptiplySink(OptiplySink):
         }
 
         if "id" in record:
-            payload["data"]["id"] = record["id"]
+            payload["data"]["id"] = str(record["id"])
 
         return payload
 
