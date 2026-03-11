@@ -19,8 +19,29 @@ from target_optiply.client import OptiplySink
 
 logger = logging.getLogger(__name__)
 
-_root_dir = os.environ.get("ROOT_DIR", ".")
-SNAPSHOT_DIR = os.environ.get("SNAPSHOT_DIR") or f"{_root_dir}/snapshots"
+def _resolve_snapshot_dir() -> str:
+    """Resolve the snapshot directory, walking up from cwd if needed."""
+    explicit = os.environ.get("SNAPSHOT_DIR")
+    if explicit:
+        return explicit
+    root = os.environ.get("ROOT_DIR")
+    if root:
+        return os.path.join(root, "snapshots")
+    # Auto-detect: walk up from cwd looking for an existing snapshots/ dir
+    cwd = os.getcwd()
+    candidate = cwd
+    for _ in range(4):  # max 4 levels up
+        path = os.path.join(candidate, "snapshots")
+        if os.path.isdir(path):
+            return path
+        parent = os.path.dirname(candidate)
+        if parent == candidate:
+            break
+        candidate = parent
+    return os.path.join(cwd, "snapshots")  # fallback
+
+
+SNAPSHOT_DIR = _resolve_snapshot_dir()
 
 
 class BaseOptiplySink(OptiplySink):
@@ -184,12 +205,7 @@ class BaseOptiplySink(OptiplySink):
             return None, False, {"error": error_msg}
 
     def clean_up(self) -> None:
-        # Log cwd and snapshot dir for path debugging
-        import glob as _glob
-        cwd = os.getcwd()
-        abs_snapshot_dir = os.path.abspath(SNAPSHOT_DIR)
-        snapshot_files = _glob.glob(os.path.join(abs_snapshot_dir, "*"))
-        self.logger.info(f"[clean_up] cwd={cwd} | SNAPSHOT_DIR={SNAPSHOT_DIR} -> {abs_snapshot_dir} | files={snapshot_files}")
+        self.logger.info(f"[clean_up] SNAPSHOT_DIR resolved to: {os.path.abspath(SNAPSHOT_DIR)}")
 
         if self.write_etl_snapshot and self._etl_snapshot_cache:
             self._enrich_sdk_snapshot()
