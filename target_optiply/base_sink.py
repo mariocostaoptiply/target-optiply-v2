@@ -85,10 +85,6 @@ class BaseOptiplySink(OptiplySink):
 
             self._record_count += 1
 
-            # TEST ONLY: force failure on record 3
-            if self._record_count == 3:
-                raise FatalAPIError("TEST: forced failure on record 3")
-
             if deleted_at and record_id:
                 http_method = "DELETE"
             elif record_id:
