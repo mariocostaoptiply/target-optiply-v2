@@ -11,7 +11,7 @@ class ProductSchema(OptiplyBaseSchema):
 
     # Mandatory
     name: str
-    stockLevel: float
+    stockLevel: int
     unlimitedStock: bool = False
 
     # Optional
