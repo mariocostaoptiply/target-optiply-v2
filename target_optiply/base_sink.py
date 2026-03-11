@@ -102,7 +102,7 @@ class BaseOptiplySink(OptiplySink):
             }
         }
 
-        if "id" in record:
+        if "id" in record and record["id"] is not None and str(record["id"]).lower() not in ("nan", "", "none"):
             payload["data"]["id"] = str(record["id"])
 
         return payload
@@ -126,6 +126,9 @@ class BaseOptiplySink(OptiplySink):
                 record_id = record["data"]["id"]
             elif "id" in record:
                 record_id = record["id"]
+
+            if record_id is not None and str(record_id).lower() in ("nan", "", "none"):
+                record_id = None
 
             self._record_count += 1
 
