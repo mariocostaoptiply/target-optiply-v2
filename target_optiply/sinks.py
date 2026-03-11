@@ -20,9 +20,7 @@ class ProductsSink(BaseOptiplySink):
     """Products sink."""
 
     endpoint = "products"
-    write_etl_snapshot = True
     unified_schema = ProductSchema
-    concat_exclude_fields = ("updatedAt", "createdAtRemote", "deletedAt")
 
     @property
     def name(self) -> str:
