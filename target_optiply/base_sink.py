@@ -184,6 +184,13 @@ class BaseOptiplySink(OptiplySink):
             return None, False, {"error": error_msg}
 
     def clean_up(self) -> None:
+        # Log cwd and snapshot dir for path debugging
+        import glob as _glob
+        cwd = os.getcwd()
+        abs_snapshot_dir = os.path.abspath(SNAPSHOT_DIR)
+        snapshot_files = _glob.glob(os.path.join(abs_snapshot_dir, "*"))
+        self.logger.info(f"[clean_up] cwd={cwd} | SNAPSHOT_DIR={SNAPSHOT_DIR} -> {abs_snapshot_dir} | files={snapshot_files}")
+
         if self.write_etl_snapshot and self._etl_snapshot_cache:
             self._enrich_sdk_snapshot()
         super().clean_up()
