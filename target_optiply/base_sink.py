@@ -2,14 +2,11 @@
 
 from __future__ import annotations
 
-import csv
-import glob
 import json
 import logging
 import os
 from datetime import datetime
 from decimal import Decimal
-from pathlib import Path
 from typing import Dict, List, Optional, Type
 
 from pydantic import BaseModel
@@ -20,30 +17,6 @@ from target_optiply.client import OptiplySink
 
 logger = logging.getLogger(__name__)
 
-def _resolve_snapshot_dir() -> str:
-    """Resolve the snapshot directory, walking up from cwd if needed."""
-    explicit = os.environ.get("SNAPSHOT_DIR")
-    if explicit:
-        return explicit
-    root = os.environ.get("ROOT_DIR")
-    if root:
-        return os.path.join(root, "snapshots")
-    # Auto-detect: walk up from cwd looking for an existing snapshots/ dir
-    cwd = os.getcwd()
-    candidate = cwd
-    for _ in range(4):  # max 4 levels up
-        path = os.path.join(candidate, "snapshots")
-        if os.path.isdir(path):
-            return path
-        parent = os.path.dirname(candidate)
-        if parent == candidate:
-            break
-        candidate = parent
-    return os.path.join(cwd, "snapshots")  # fallback
-
-
-SNAPSHOT_DIR = _resolve_snapshot_dir()
-
 
 class BaseOptiplySink(OptiplySink):
     """Base sink for Optiply streams."""
@@ -51,14 +24,10 @@ class BaseOptiplySink(OptiplySink):
     endpoint = None
     field_mappings = {}
     unified_schema: Optional[Type[BaseModel]] = None
-    # Set to True on a sink to enable ETL snapshot enrichment in clean_up()
-    write_etl_snapshot: bool = False
-    concat_exclude_fields: tuple = ()
 
     def __init__(self, target: PluginBase, stream_name: str, schema: Dict, key_properties: List[str]):
         super().__init__(target, stream_name, schema, key_properties)
         self.endpoint = self.stream_name.lower() if not self.endpoint else self.endpoint
-        self._etl_snapshot_cache: Optional[Dict[str, dict]] = None
         self._record_count: int = 0
         self._stashed_external_id = None
         total_env = os.environ.get(f"STREAM_TOTAL_{stream_name.upper()}")
@@ -71,15 +40,6 @@ class BaseOptiplySink(OptiplySink):
 
     def preprocess_record(self, record: dict, context: dict) -> dict:
         """Preprocess the record before sending to API."""
-        # Stash original source fields for snapshot writing in clean_up().
-        # Note: externalId is popped by the SDK before this call; it will be
-        # re-injected after and retrieved from upsert_record's record param.
-        self._current_original = {
-            k: v.isoformat() if isinstance(v, datetime) else v
-            for k, v in record.items()
-            if not k.startswith("_sdc_") and k != "id"
-        }
-
         # Apply unified schema validation and type coercion
         if self.unified_schema is not None:
             try:
@@ -92,9 +52,6 @@ class BaseOptiplySink(OptiplySink):
             attributes = self.build_attributes(record, self.field_mappings)
 
         self._add_additional_attributes(record, attributes)
-
-        # Compute concat_attributes from API-bound fields, excluding datetimes
-        self._current_concat = self._compute_concat_attributes(attributes)
 
         payload = {
             "data": {
@@ -112,14 +69,9 @@ class BaseOptiplySink(OptiplySink):
         """Process the record and return (id, success, state_updates)."""
         # externalId is double-popped by the SDK; stashed in process_record override
         external_id = record.get("externalId") or self._stashed_external_id
-        original = {**getattr(self, "_current_original", {})}
-        if external_id:
-            original["externalId"] = external_id
-
-        concat = getattr(self, "_current_concat", "")
 
         # Check for delete signal
-        deleted_at = record.get("_sdc_deleted_at") or original.get("deleted_at")
+        deleted_at = record.get("_sdc_deleted_at") or record.get("deleted_at")
 
         try:
             record_id = None
@@ -140,14 +92,6 @@ class BaseOptiplySink(OptiplySink):
             if deleted_at and record_id:
                 http_method = "DELETE"
             elif record_id:
-                # PATCH — check concat_attributes to skip if unchanged
-                if self.write_etl_snapshot and external_id:
-                    snapshot = self._load_etl_snapshot()
-                    existing = snapshot.get(str(external_id))
-                    if existing and existing.get("concat_attributes") == concat:
-                        count_label = f"#{self._record_count}/{self._record_total}" if self._record_total else f"#{self._record_count}"
-                        self.logger.info(f"{self.stream_name} [{count_label}] SKIPPED (no changes): {external_id}")
-                        return record_id, True, {"_action": "skip"}
                 http_method = "PATCH"
             else:
                 http_method = "POST"
@@ -188,146 +132,18 @@ class BaseOptiplySink(OptiplySink):
             response_data = response.json() if http_method != "DELETE" else {}
             response_record_id = response_data.get("data", {}).get("id") or record_id or "unknown"
 
-            snapshot_row = {**original, "concat_attributes": concat}
-
-            if self.write_etl_snapshot:
-                self._update_snapshot_cache(
-                    external_id=str(external_id) if external_id else None,
-                    remote_id=str(response_record_id),
-                    row=snapshot_row,
-                    action="delete" if http_method == "DELETE" else "upsert",
-                )
-
-            state_updates = {
-                "_snapshot_row": snapshot_row,
-                "_action": "delete" if http_method == "DELETE" else "upsert",
-            }
+            state_updates = {"_action": "delete" if http_method == "DELETE" else "upsert"}
             if http_method == "PATCH":
                 state_updates["is_updated"] = True
 
             return response_record_id, True, state_updates
 
+        except FatalAPIError:
+            raise
         except Exception as e:
             error_msg = f"Error processing record: {str(e)}"
             self.logger.error(error_msg)
             return None, False, {"error": error_msg}
-
-    def clean_up(self) -> None:
-        self.logger.info(f"[clean_up] SNAPSHOT_DIR resolved to: {os.path.abspath(SNAPSHOT_DIR)}")
-
-        if self.write_etl_snapshot and self._etl_snapshot_cache:
-            self._enrich_sdk_snapshot()
-        super().clean_up()
-
-    # -------------------------------------------------------------------------
-    # Snapshot helpers
-    # -------------------------------------------------------------------------
-
-    def _find_sdk_snapshot_path(self) -> Optional[str]:
-        """Find the SDK platform snapshot file for this stream."""
-        flow_id = os.environ.get("FLOW")
-        if flow_id:
-            path = os.path.join(SNAPSHOT_DIR, f"{self.stream_name}_{flow_id}.snapshot.csv")
-            if os.path.isfile(path):
-                return path
-        # Fallback: glob for SDK snapshot only (exclude enriched variant)
-        matches = [
-            p for p in glob.glob(os.path.join(SNAPSHOT_DIR, f"{self.stream_name}_*.snapshot.csv"))
-            if "_enriched_" not in os.path.basename(p)
-        ]
-        return matches[0] if matches else None
-
-    def _load_etl_snapshot(self) -> Dict[str, dict]:
-        """Load snapshot once per stream run, keyed by InputId (= externalId).
-
-        Primary source: previous run's state bookmarks (persisted to S3 by SDK).
-        Fallback: SDK platform snapshot CSV (InputId/RemoteId only).
-        """
-        if self._etl_snapshot_cache is not None:
-            return self._etl_snapshot_cache
-
-        cache: Dict[str, dict] = {}
-
-        # Primary: read from previous state bookmarks (has concat_attributes)
-        bookmarks = self.latest_state.get("bookmarks", {}).get(self.name, [])
-        for entry in bookmarks:
-            external_id = str(entry.get("externalId", ""))
-            snapshot_row = entry.get("_snapshot_row")
-            if external_id and snapshot_row:
-                row = {k: ("" if v is None else str(v)) for k, v in snapshot_row.items()}
-                row["InputId"] = external_id
-                if entry.get("id"):
-                    row["RemoteId"] = str(entry["id"])
-                cache[external_id] = row
-
-        # Fallback: SDK platform snapshot CSV (no concat_attributes, but has RemoteId)
-        if not cache:
-            path = self._find_sdk_snapshot_path()
-            if path:
-                with open(path, newline="", encoding="utf-8") as f:
-                    for row in csv.DictReader(f):
-                        input_id = row.get("InputId", "")
-                        if input_id:
-                            cache[str(input_id)] = row
-
-        self._etl_snapshot_cache = cache
-        return cache
-
-    def _update_snapshot_cache(self, external_id: Optional[str], remote_id: str, row: dict, action: str) -> None:
-        """Update the in-memory snapshot cache after each successful API call."""
-        cache = self._load_etl_snapshot()
-        if not external_id:
-            return
-
-        if action == "delete":
-            cache.pop(external_id, None)
-        else:
-            existing = cache.get(external_id, {})
-            updated = {k: ("" if v is None else str(v)) for k, v in row.items() if k != "id"}
-            updated["InputId"] = external_id
-            updated["RemoteId"] = remote_id
-            # Preserve any existing columns we didn't touch
-            cache[external_id] = {**existing, **updated}
-
-    def _enrich_sdk_snapshot(self) -> None:
-        """Write enriched snapshot (InputId, RemoteId + all original fields + concat_attributes).
-
-        Written to the SDK snapshot path ({stream_name}_{flow_id}.snapshot.csv) so that if the
-        executor uploads whatever is on disk, our enriched data is preserved in S3.
-        """
-        flow_id = os.environ.get("FLOW")
-        if not flow_id:
-            self.logger.warning("FLOW env var not set — cannot write enriched ETL snapshot")
-            return
-
-        path = os.path.join(SNAPSHOT_DIR, f"{self.stream_name}_{flow_id}.snapshot.csv")
-        Path(SNAPSHOT_DIR).mkdir(parents=True, exist_ok=True)
-
-        cache = self._etl_snapshot_cache
-        if not cache:
-            return
-
-        all_fields: List[str] = ["InputId", "RemoteId"]
-        for row in cache.values():
-            for k in row:
-                if k not in all_fields:
-                    all_fields.append(k)
-
-        with open(path, "w", newline="", encoding="utf-8") as f:
-            writer = csv.DictWriter(f, fieldnames=all_fields, extrasaction="ignore", restval="")
-            writer.writeheader()
-            writer.writerows(cache.values())
-
-        self.logger.info(f"SDK snapshot enriched and written: {path} ({len(cache)} rows)")
-
-    def _compute_concat_attributes(self, attributes: dict) -> str:
-        """Build a pipe-delimited string from API attributes, excluding configured fields."""
-        values = []
-        for k in sorted(attributes.keys()):
-            if k in self.concat_exclude_fields:
-                continue
-            values.append(str(attributes[k]))
-        return "|".join(values)
 
     def build_attributes(self, record: Dict, field_mappings: Dict[str, str]) -> Dict:
         attributes = {}
