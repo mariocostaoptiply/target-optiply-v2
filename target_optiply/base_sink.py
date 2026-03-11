@@ -259,17 +259,17 @@ class BaseOptiplySink(OptiplySink):
             cache[external_id] = {**existing, **updated}
 
     def _enrich_sdk_snapshot(self) -> None:
-        """Write enriched ETL snapshot (InputId, RemoteId + all original fields + concat_attributes).
+        """Write enriched snapshot (InputId, RemoteId + all original fields + concat_attributes).
 
-        Written to a separate filename ({stream_name}_enriched_{flow_id}.snapshot.csv) so the
-        Hotglue executor cannot overwrite it when it regenerates the SDK snapshot after target exit.
+        Written to the SDK snapshot path ({stream_name}_{flow_id}.snapshot.csv) so that if the
+        executor uploads whatever is on disk, our enriched data is preserved in S3.
         """
         flow_id = os.environ.get("FLOW")
         if not flow_id:
             self.logger.warning("FLOW env var not set — cannot write enriched ETL snapshot")
             return
 
-        path = os.path.join(SNAPSHOT_DIR, f"{self.stream_name}_enriched_{flow_id}.snapshot.csv")
+        path = os.path.join(SNAPSHOT_DIR, f"{self.stream_name}_{flow_id}.snapshot.csv")
         Path(SNAPSHOT_DIR).mkdir(parents=True, exist_ok=True)
 
         cache = self._etl_snapshot_cache
@@ -287,7 +287,7 @@ class BaseOptiplySink(OptiplySink):
             writer.writeheader()
             writer.writerows(cache.values())
 
-        self.logger.info(f"ETL snapshot written: {path} ({len(cache)} rows)")
+        self.logger.info(f"SDK snapshot enriched and written: {path} ({len(cache)} rows)")
 
     def _compute_concat_attributes(self, attributes: dict) -> str:
         """Build a pipe-delimited string from API attributes, excluding configured fields."""
