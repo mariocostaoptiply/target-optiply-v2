@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Type
 
 from pydantic import BaseModel
+from singer_sdk.exceptions import FatalAPIError
 from singer_sdk.plugin_base import PluginBase
 
 from target_optiply.client import OptiplySink
@@ -171,10 +172,10 @@ class BaseOptiplySink(OptiplySink):
             request_data = None if http_method == "DELETE" else record
             response = self.request_api(http_method=http_method, endpoint=endpoint, request_data=request_data)
 
-            if response.status_code == 404:
+            if response.status_code >= 400 and http_method in ("POST", "PATCH"):
                 error_details = self._get_error_message(response.text, response.status_code, response.url)
-                self.logger.warning(f"Record not found (404): {record_id} - {error_details}")
-                return None, False, {"error": error_details}
+                self.logger.error(f"Request failed with status {response.status_code}: {error_details}")
+                raise FatalAPIError(f"{http_method} {self.endpoint} failed ({response.status_code}): {error_details}")
             elif response.status_code >= 400:
                 error_details = self._get_error_message(response.text, response.status_code, response.url)
                 self.logger.error(f"Request failed with status {response.status_code}: {error_details}")
