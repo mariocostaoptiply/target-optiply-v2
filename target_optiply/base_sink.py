@@ -63,6 +63,10 @@ class BaseOptiplySink(OptiplySink):
         if "id" in record and record["id"] is not None and str(record["id"]).lower() not in ("nan", "", "none"):
             payload["data"]["id"] = str(record["id"])
 
+        deleted_at = record.get("deleted_at") or record.get("_sdc_deleted_at")
+        if deleted_at:
+            payload["deleted_at"] = deleted_at
+
         return payload
 
     def upsert_record(self, record: dict, context: dict) -> tuple:
