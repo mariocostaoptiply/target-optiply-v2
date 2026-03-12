@@ -8,6 +8,7 @@ from target_optiply.base_sink import BaseOptiplySink
 from target_optiply.unified_schemas import (
     BuyOrderLineSchema,
     BuyOrderSchema,
+    ProductCompositionSchema,
     ProductSchema,
     SellOrderLineSchema,
     SellOrderSchema,
@@ -130,3 +131,17 @@ class SellOrderLineSink(BaseOptiplySink):
 
     def get_mandatory_fields(self) -> List[str]:
         return ["subtotalValue", "sellOrderId", "productId", "quantity"]
+
+
+class ProductCompositionSink(BaseOptiplySink):
+    """Product compositions sink."""
+
+    endpoint = "productCompositions"
+    unified_schema = ProductCompositionSchema
+
+    @property
+    def name(self) -> str:
+        return "ProductCompositions"
+
+    def get_mandatory_fields(self) -> List[str]:
+        return ["composedProductId", "partProductId", "partQuantity"]

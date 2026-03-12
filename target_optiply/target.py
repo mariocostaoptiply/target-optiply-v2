@@ -11,6 +11,7 @@ from target_optiply.sinks import (
     BuyOrderLineSink,
     SellOrderSink,
     SellOrderLineSink,
+    ProductCompositionSink,
 )
 
 
@@ -28,6 +29,7 @@ class TargetOptiply(TargetHotglue):
         BuyOrderLineSink,
         SellOrderSink,
         SellOrderLineSink,
+        ProductCompositionSink,
     ]
 
     def get_sink_class(self, stream_name: str):
@@ -39,6 +41,7 @@ class TargetOptiply(TargetHotglue):
             "BuyOrderLines": BuyOrderLineSink,
             "SellOrders": SellOrderSink,
             "SellOrderLines": SellOrderLineSink,
+            "ProductCompositions": ProductCompositionSink,
         }.get(stream_name, BaseOptiplySink)
 
 
