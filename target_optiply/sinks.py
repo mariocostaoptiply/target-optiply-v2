@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import csv
+import os
 from typing import Dict, List
 
 from target_optiply.base_sink import BaseOptiplySink
@@ -29,6 +31,21 @@ class ProductsSink(BaseOptiplySink):
 
     def get_mandatory_fields(self) -> List[str]:
         return ["name", "stockLevel"]
+
+    def upsert_record(self, record: dict, context: dict) -> tuple:
+        record_id, success, state_updates = super().upsert_record(record, context)
+        if success and record_id and self._stashed_external_id:
+            snapshot_dir = os.environ.get("SNAPSHOT_DIR", "")
+            flow_id = os.environ.get("FLOW", "")
+            if snapshot_dir and flow_id:
+                snapshot_path = os.path.join(snapshot_dir, f"Products_{flow_id}.snapshot.csv")
+                file_exists = os.path.exists(snapshot_path)
+                with open(snapshot_path, "a", newline="") as f:
+                    writer = csv.DictWriter(f, fieldnames=["InputId", "RemoteId"])
+                    if not file_exists:
+                        writer.writeheader()
+                    writer.writerow({"InputId": str(self._stashed_external_id), "RemoteId": str(record_id)})
+        return record_id, success, state_updates
 
 
 class SupplierSink(BaseOptiplySink):

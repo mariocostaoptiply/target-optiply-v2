@@ -34,8 +34,8 @@ class BaseOptiplySink(OptiplySink):
         self._record_total: Optional[int] = int(total_env) if total_env else None
 
     def process_record(self, record: dict, context: dict) -> None:
-        """Stash externalId before the SDK pops it, then delegate."""
-        self._stashed_external_id = record.get("externalId")
+        """Stash externalId/inputId before the SDK pops it, then delegate."""
+        self._stashed_external_id = record.get("externalId") or record.get("inputId")
         super().process_record(record, context)
 
     def preprocess_record(self, record: dict, context: dict) -> dict:
