@@ -85,7 +85,7 @@ class BaseOptiplySink(OptiplySink):
 
             self._record_count += 1
 
-if deleted_at and record_id:
+            if deleted_at and record_id:
                 http_method = "DELETE"
             elif record_id:
                 http_method = "PATCH"
