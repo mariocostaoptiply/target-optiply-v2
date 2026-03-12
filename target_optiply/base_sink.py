@@ -32,8 +32,7 @@ class BaseOptiplySink(OptiplySink):
         self._stashed_external_id = None
         total_env = os.environ.get(f"STREAM_TOTAL_{stream_name.upper()}")
         self._record_total: Optional[int] = int(total_env) if total_env else None
-        force_fail_key = f"{stream_name.lower()}_force_fail_test"
-        force_fail_val = self.config.get(force_fail_key, "")
+        force_fail_val = os.environ.get(f"{stream_name.upper()}_FORCE_FAIL_TEST", "")
         self._force_fail_records: set = {
             int(n.strip()) for n in force_fail_val.split(",") if n.strip().isdigit()
         } if force_fail_val else set()
