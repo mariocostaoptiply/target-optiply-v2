@@ -7,9 +7,8 @@ from target_optiply.unified_schemas.base import OptiplyBaseSchema
 
 class ProductCompositionSchema(OptiplyBaseSchema):
 
-    # Mandatory
-    composedProductId: str
-    partProductId: str
+    composedProductId: Optional[str] = None
+    partProductId: Optional[str] = None
     partQuantity: int
 
     @field_validator("composedProductId", "partProductId", mode="before")
