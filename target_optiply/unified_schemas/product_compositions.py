@@ -8,18 +8,15 @@ from target_optiply.unified_schemas.base import OptiplyBaseSchema
 class ProductCompositionSchema(OptiplyBaseSchema):
 
     # Mandatory
-    composedProductId: int
-    partProductId: int
+    composedProductId: str
+    partProductId: str
     partQuantity: int
 
     @field_validator("composedProductId", "partProductId", mode="before")
     @classmethod
-    def coerce_int(cls, v):
+    def coerce_str(cls, v):
         if v is not None:
-            try:
-                return int(float(v))
-            except (ValueError, TypeError):
-                return None
+            return str(v)
         return v
 
     @field_validator("partQuantity", mode="before")
