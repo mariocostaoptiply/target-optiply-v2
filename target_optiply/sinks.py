@@ -138,6 +138,10 @@ class ProductCompositionSink(BaseOptiplySink):
 
     endpoint = "productCompositions"
     unified_schema = ProductCompositionSchema
+    relation_fields = [
+        {"field": "Remote_composedProductId", "objectName": "Products"},
+        {"field": "Remote_partProductId", "objectName": "Products"},
+    ]
 
     @property
     def name(self) -> str:
@@ -145,3 +149,11 @@ class ProductCompositionSink(BaseOptiplySink):
 
     def get_mandatory_fields(self) -> List[str]:
         return ["composedProductId", "partProductId", "partQuantity"]
+
+    def _add_additional_attributes(self, record: Dict, attributes: Dict) -> None:
+        attributes["composedProductId"] = (
+            record.get("composedProductId") or record.get("Remote_composedProductId")
+        )
+        attributes["partProductId"] = (
+            record.get("partProductId") or record.get("Remote_partProductId")
+        )
