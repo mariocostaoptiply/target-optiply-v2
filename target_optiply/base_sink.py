@@ -36,6 +36,8 @@ class BaseOptiplySink(OptiplySink):
         self._force_fail_records: set = {
             int(n.strip()) for n in str(force_fail_val).split(",") if n.strip().isdigit()
         } if force_fail_val else set()
+        if self._force_fail_records:
+            self.logger.info(f"{stream_name} force-fail enabled for records: {sorted(self._force_fail_records)}")
 
     def process_record(self, record: dict, context: dict) -> None:
         """Stash externalId before the SDK pops it, then delegate."""
