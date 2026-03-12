@@ -32,6 +32,11 @@ class BaseOptiplySink(OptiplySink):
         self._stashed_external_id = None
         total_env = os.environ.get(f"STREAM_TOTAL_{stream_name.upper()}")
         self._record_total: Optional[int] = int(total_env) if total_env else None
+        force_fail_key = f"{stream_name.lower()}_force_fail_test"
+        force_fail_val = self.config.get(force_fail_key, "")
+        self._force_fail_records: set = {
+            int(n.strip()) for n in force_fail_val.split(",") if n.strip().isdigit()
+        } if force_fail_val else set()
 
     def process_record(self, record: dict, context: dict) -> None:
         """Stash externalId before the SDK pops it, then delegate."""
@@ -84,6 +89,9 @@ class BaseOptiplySink(OptiplySink):
                 record_id = None
 
             self._record_count += 1
+
+            if self._force_fail_records and self._record_count in self._force_fail_records:
+                raise FatalAPIError(f"TEST: forced failure on record {self._record_count}")
 
             if deleted_at and record_id:
                 http_method = "DELETE"
