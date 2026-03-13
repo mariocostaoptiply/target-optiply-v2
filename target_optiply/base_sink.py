@@ -119,7 +119,11 @@ class BaseOptiplySink(OptiplySink):
             request_data = None if http_method == "DELETE" else record
             response = self.request_api(http_method=http_method, endpoint=endpoint, request_data=request_data)
 
-            if response.status_code >= 400 and http_method in ("POST", "PATCH"):
+            if response.status_code == 404:
+                error_details = self._get_error_message(response.text, response.status_code, response.url)
+                self.logger.error(f"Request failed with status 404: {error_details}")
+                return None, False, {"error": error_details}
+            elif response.status_code >= 400 and http_method in ("POST", "PATCH"):
                 error_details = self._get_error_message(response.text, response.status_code, response.url)
                 self.logger.error(f"Request failed with status {response.status_code}: {error_details}")
                 raise FatalAPIError(f"{http_method} {self.endpoint} failed ({response.status_code}): {error_details}")

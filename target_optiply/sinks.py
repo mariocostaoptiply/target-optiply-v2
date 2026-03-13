@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-import csv
-import os
 from typing import Dict, List
 
 from target_optiply.base_sink import BaseOptiplySink
+
+# In-memory cache: source inputId → Optiply id, populated by ProductsSink during the run
+_products_id_cache: Dict[str, str] = {}
 from target_optiply.unified_schemas import (
     BuyOrderLineSchema,
     BuyOrderSchema,
@@ -35,16 +36,7 @@ class ProductsSink(BaseOptiplySink):
     def upsert_record(self, record: dict, context: dict) -> tuple:
         record_id, success, state_updates = super().upsert_record(record, context)
         if success and record_id and self._stashed_external_id:
-            snapshot_dir = os.environ.get("SNAPSHOT_DIR", "")
-            flow_id = os.environ.get("FLOW", "")
-            if snapshot_dir and flow_id:
-                snapshot_path = os.path.join(snapshot_dir, f"Products_{flow_id}.snapshot.csv")
-                file_exists = os.path.exists(snapshot_path)
-                with open(snapshot_path, "a", newline="") as f:
-                    writer = csv.DictWriter(f, fieldnames=["InputId", "RemoteId"])
-                    if not file_exists:
-                        writer.writeheader()
-                    writer.writerow({"InputId": str(self._stashed_external_id), "RemoteId": str(record_id)})
+            _products_id_cache[str(self._stashed_external_id)] = str(record_id)
         return record_id, success, state_updates
 
 
@@ -155,10 +147,6 @@ class ProductCompositionSink(BaseOptiplySink):
 
     endpoint = "productCompositions"
     unified_schema = ProductCompositionSchema
-    relation_fields = [
-        {"field": "Remote_composedProductId", "objectName": "Products"},
-        {"field": "Remote_partProductId", "objectName": "Products"},
-    ]
 
     @property
     def name(self) -> str:
@@ -168,9 +156,25 @@ class ProductCompositionSink(BaseOptiplySink):
         return ["composedProductId", "partProductId", "partQuantity"]
 
     def _add_additional_attributes(self, record: Dict, attributes: Dict) -> None:
-        attributes["composedProductId"] = (
-            record.get("composedProductId") or record.get("Remote_composedProductId")
-        )
-        attributes["partProductId"] = (
-            record.get("partProductId") or record.get("Remote_partProductId")
-        )
+        remote_composed = record.get("Remote_composedProductId")
+        remote_part = record.get("Remote_partProductId")
+
+        composed_id = (
+            _products_id_cache.get(str(remote_composed)) if remote_composed else None
+        ) or record.get("composedProductId")
+
+        part_id = (
+            _products_id_cache.get(str(remote_part)) if remote_part else None
+        ) or record.get("partProductId")
+
+        if not composed_id or not part_id:
+            self.logger.error(
+                f"ProductCompositions skipped: could not resolve IDs "
+                f"(composedProductId={composed_id}, partProductId={part_id})"
+            )
+            attributes.pop("composedProductId", None)
+            attributes.pop("partProductId", None)
+            return
+
+        attributes["composedProductId"] = composed_id
+        attributes["partProductId"] = part_id
