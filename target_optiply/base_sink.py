@@ -24,6 +24,7 @@ class BaseOptiplySink(OptiplySink):
     endpoint = None
     field_mappings = {}
     unified_schema: Optional[Type[BaseModel]] = None
+    _job_healthy: bool = True  # class-level flag; False skips all remaining records across all sinks
 
     def __init__(self, target: PluginBase, stream_name: str, schema: Dict, key_properties: List[str]):
         super().__init__(target, stream_name, schema, key_properties)
@@ -71,6 +72,10 @@ class BaseOptiplySink(OptiplySink):
 
     def upsert_record(self, record: dict, context: dict) -> tuple:
         """Process the record and return (id, success, state_updates)."""
+        if not BaseOptiplySink._job_healthy:
+            self.logger.warning(f"{self.stream_name} record skipped — job marked unhealthy after Products failure")
+            return None, False, {"error": "Skipped — job marked unhealthy after Products failure"}
+
         # externalId is double-popped by the SDK; stashed in process_record override
         external_id = record.get("externalId") or self._stashed_external_id
 

@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from typing import Dict, List
 
-from singer_sdk.exceptions import FatalAPIError
-
 from target_optiply.base_sink import BaseOptiplySink
 
 # In-memory cache: source inputId → Optiply id, populated by ProductsSink during the run
@@ -39,13 +37,9 @@ class ProductsSink(BaseOptiplySink):
         self._last_was_fatal = False
         super().process_record(record, context)
         if self._last_was_fatal:
-            raise FatalAPIError(f"Products record failed — aborting job to preserve data integrity")
+            BaseOptiplySink._job_healthy = False
 
     def upsert_record(self, record: dict, context: dict) -> tuple:
-        # TEMP: force fail on record 4 for testing
-        if self._record_count == 3:
-            self._last_was_fatal = True
-            return None, False, {"error": "TEST: forced failure on record 4"}
         record_id, success, state_updates = super().upsert_record(record, context)
         if success and record_id and self._stashed_external_id:
             _products_id_cache[str(self._stashed_external_id)] = str(record_id)
