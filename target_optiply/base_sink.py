@@ -17,6 +17,13 @@ from target_optiply.client import OptiplySink
 
 logger = logging.getLogger(__name__)
 
+_FIELD_ALIASES = {
+    "optiply_id": "id",
+    "remoteId": "externalId",
+    "updated_at": "updatedAt",
+    "created_at": "createdAtRemote",
+}
+
 
 class BaseOptiplySink(OptiplySink):
     """Base sink for Optiply streams."""
@@ -40,6 +47,9 @@ class BaseOptiplySink(OptiplySink):
 
     def preprocess_record(self, record: dict, context: dict) -> dict:
         """Preprocess the record before sending to API."""
+        for alias, canonical in _FIELD_ALIASES.items():
+            if alias in record and canonical not in record:
+                record[canonical] = record.pop(alias)
         self._stashed_external_id = record.get("externalId") or record.get("inputId")
         # Apply unified schema validation and type coercion
         if self.unified_schema is not None:
