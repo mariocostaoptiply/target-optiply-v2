@@ -30,6 +30,7 @@ class BaseOptiplySink(OptiplySink):
         self.endpoint = self.stream_name.lower() if not self.endpoint else self.endpoint
         self._record_count: int = 0
         self._stashed_external_id = None
+        self._last_was_fatal = False
         total_env = os.environ.get(f"STREAM_TOTAL_{stream_name.upper()}")
         self._record_total: Optional[int] = int(total_env) if total_env else None
 
@@ -126,7 +127,8 @@ class BaseOptiplySink(OptiplySink):
             elif response.status_code >= 400 and http_method in ("POST", "PATCH"):
                 error_details = self._get_error_message(response.text, response.status_code, response.url)
                 self.logger.error(f"Request failed with status {response.status_code}: {error_details}")
-                raise FatalAPIError(f"{http_method} {self.endpoint} failed ({response.status_code}): {error_details}")
+                self._last_was_fatal = True
+                return None, False, {"error": error_details}
             elif response.status_code >= 400:
                 error_details = self._get_error_message(response.text, response.status_code, response.url)
                 self.logger.error(f"Request failed with status {response.status_code}: {error_details}")
