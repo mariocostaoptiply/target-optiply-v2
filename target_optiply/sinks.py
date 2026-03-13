@@ -168,9 +168,10 @@ class ProductCompositionSink(BaseOptiplySink):
         ) or record.get("partProductId")
 
         if not composed_id or not part_id:
-            self.logger.error(
+            self.logger.warning(
                 f"ProductCompositions skipped: could not resolve IDs "
-                f"(composedProductId={composed_id}, partProductId={part_id})"
+                f"(Remote_composedProductId={remote_composed}, Remote_partProductId={remote_part}) — "
+                f"product may no longer exist"
             )
             attributes.pop("composedProductId", None)
             attributes.pop("partProductId", None)
