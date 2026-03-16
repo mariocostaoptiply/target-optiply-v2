@@ -43,6 +43,7 @@ class BaseOptiplySink(OptiplySink):
         self._record_total: Optional[int] = int(total_env) if total_env else None
 
     def process_record(self, record: dict, context: dict) -> None:
+        self._stashed_external_id = record.get("externalId") or record.get("inputId")
         super().process_record(record, context)
 
     def preprocess_record(self, record: dict, context: dict) -> dict:
@@ -50,7 +51,6 @@ class BaseOptiplySink(OptiplySink):
         for alias, canonical in _FIELD_ALIASES.items():
             if alias in record and canonical not in record:
                 record[canonical] = record.pop(alias)
-        self._stashed_external_id = record.get("externalId") or record.get("inputId")
         # Apply unified schema validation and type coercion
         if self.unified_schema is not None:
             try:
