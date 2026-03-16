@@ -40,6 +40,11 @@ class ProductsSink(BaseOptiplySink):
             BaseOptiplySink._job_healthy = False
 
     def upsert_record(self, record: dict, context: dict) -> tuple:
+        # TEMP: simulate 400 failure on record 3 for testing
+        if self._record_count == 2:
+            self.logger.error("TEST: simulated 400 failure on record 3")
+            self._last_was_fatal = True
+            return None, False, {"error": "TEST: simulated 400 on record 3"}
         record_id, success, state_updates = super().upsert_record(record, context)
         if success and record_id and self._stashed_external_id:
             _products_id_cache[str(self._stashed_external_id)] = str(record_id)
