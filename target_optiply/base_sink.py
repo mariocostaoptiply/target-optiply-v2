@@ -39,6 +39,7 @@ class BaseOptiplySink(OptiplySink):
         self._record_count: int = 0
         self._stashed_external_id = None
         self._last_was_fatal = False
+        self._last_response_status: Optional[int] = None
         total_env = os.environ.get(f"STREAM_TOTAL_{stream_name.upper()}")
         self._record_total: Optional[int] = int(total_env) if total_env else None
 
@@ -134,6 +135,8 @@ class BaseOptiplySink(OptiplySink):
             endpoint = f"{self.endpoint}/{record_id}" if record_id else self.endpoint
             request_data = None if http_method == "DELETE" else record
             response = self.request_api(http_method=http_method, endpoint=endpoint, request_data=request_data)
+
+            self._last_response_status = response.status_code
 
             if response.status_code == 404:
                 error_details = self._get_error_message(response.text, response.status_code, response.url)

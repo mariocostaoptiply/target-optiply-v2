@@ -11,6 +11,9 @@ _products_id_cache: Dict[str, str] = {}
 
 # In-memory cache: source inputId → Optiply id, populated by SupplierSink during the run
 _suppliers_id_cache: Dict[str, str] = {}
+
+# In-memory cache: source inputId → Optiply id, populated by SupplierProductSink during the run
+_supplier_products_id_cache: Dict[str, str] = {}
 from target_optiply.unified_schemas import (
     BuyOrderLineSchema,
     BuyOrderSchema,
@@ -94,6 +97,71 @@ class SupplierProductSink(BaseOptiplySink):
 
     def get_mandatory_fields(self) -> List[str]:
         return ["name", "productId", "supplierId"]
+
+    def _add_additional_attributes(self, record: Dict, attributes: Dict) -> None:
+        remote_product = record.get("Remote_productId")
+        remote_supplier = record.get("Remote_supplierId")
+
+        product_id = (
+            _products_id_cache.get(str(remote_product)) if remote_product else None
+        ) or record.get("productId")
+
+        supplier_id = (
+            _suppliers_id_cache.get(str(remote_supplier)) if remote_supplier else None
+        ) or record.get("supplierId")
+
+        if not product_id or not supplier_id:
+            self.logger.warning(
+                f"SupplierProducts skipped: could not resolve IDs "
+                f"(Remote_productId={remote_product}, Remote_supplierId={remote_supplier}) — "
+                f"product or supplier may no longer exist"
+            )
+            attributes.pop("productId", None)
+            attributes.pop("supplierId", None)
+            return
+
+        attributes["productId"] = product_id
+        attributes["supplierId"] = supplier_id
+
+    def upsert_record(self, record: dict, context: dict) -> tuple:
+        record_id, success, state_updates = super().upsert_record(record, context)
+
+        # POST 409 conflict: supplier product already exists — GET to retrieve Optiply ID
+        if not success and self._last_response_status == 409:
+            attributes = {}
+            if "data" in record and "attributes" in record["data"]:
+                attributes = record["data"]["attributes"]
+            product_id = attributes.get("productId")
+            supplier_id = attributes.get("supplierId")
+            if product_id and supplier_id:
+                self.logger.warning(
+                    f"SupplierProducts POST 409 — fetching existing record "
+                    f"(productId={product_id}, supplierId={supplier_id})"
+                )
+                get_response = self.request_api(
+                    http_method="GET",
+                    endpoint=self.endpoint,
+                    params={"filter[productId]": product_id, "filter[supplierId]": supplier_id},
+                )
+                if get_response.status_code == 200:
+                    items = get_response.json().get("data", [])
+                    if items:
+                        existing_id = items[0].get("id")
+                        if existing_id and self._stashed_external_id:
+                            _supplier_products_id_cache[str(self._stashed_external_id)] = str(existing_id)
+                        return existing_id, True, {"_action": "upsert"}
+
+        # PATCH 404: resource gone — re-POST
+        if not success and self._last_response_status == 404:
+            if "data" in record and record["data"].get("id"):
+                self.logger.warning("SupplierProducts PATCH 404 — re-posting as new record")
+                record["data"].pop("id", None)
+                record_id, success, state_updates = super().upsert_record(record, context)
+
+        if success and record_id and self._stashed_external_id:
+            _supplier_products_id_cache[str(self._stashed_external_id)] = str(record_id)
+
+        return record_id, success, state_updates
 
 
 class BuyOrderSink(BaseOptiplySink):

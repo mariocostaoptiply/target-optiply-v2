@@ -108,11 +108,11 @@ class TestSupplierSchema:
         )
         assert s.emails == ["a@b.com", "c@d.com"]
 
-    def test_emails_invalid_json_returns_empty_list(self):
+    def test_emails_plain_string_wrapped_in_list(self):
         s = SupplierSchema.model_validate(
-            {"name": "Supplier A", "emails": "not-json"}, strict=False
+            {"name": "Supplier A", "emails": "a@b.com"}, strict=False
         )
-        assert s.emails == []
+        assert s.emails == ["a@b.com"]
 
     def test_type_invalid_defaults_to_vendor(self):
         s = SupplierSchema.model_validate(
@@ -154,8 +154,8 @@ class TestSupplierProductSchema:
         sp = SupplierProductSchema.model_validate(
             {"name": "SP", "productId": "10", "supplierId": "20"}, strict=False
         )
-        assert sp.productId == 10
-        assert sp.supplierId == 20
+        assert sp.productId == "10"
+        assert sp.supplierId == "20"
 
     def test_price_rounded(self):
         sp = SupplierProductSchema.model_validate(
