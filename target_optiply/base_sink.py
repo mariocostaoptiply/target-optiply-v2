@@ -137,6 +137,9 @@ class BaseOptiplySink(OptiplySink):
 
             if response.status_code == 404:
                 error_details = self._get_error_message(response.text, response.status_code, response.url)
+                if http_method == "DELETE":
+                    self.logger.warning(f"DELETE 404 — resource already gone, treating as success: {error_details}")
+                    return record_id, True, {"_action": "delete"}
                 self.logger.error(f"Request failed with status 404: {error_details}")
                 return None, False, {"error": error_details}
             elif response.status_code >= 400 and http_method in ("POST", "PATCH"):
