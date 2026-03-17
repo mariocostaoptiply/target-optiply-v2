@@ -14,4 +14,5 @@ class SellOrderSchema(OptiplyBaseSchema):
     totalValue: Optional[str] = None
 
     # Optional
+    completed: Optional[str] = None
     line_items: Optional[str] = Field(default=None, exclude=True)  # parsed into orderLines in sink, never sent to API
