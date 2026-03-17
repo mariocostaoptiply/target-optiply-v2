@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Optional
 from pydantic import field_validator
 from target_optiply.unified_schemas.base import OptiplyBaseSchema
@@ -28,7 +27,6 @@ class SupplierProductSchema(OptiplyBaseSchema):
     freeStock: Optional[int] = None
     weight: Optional[float] = None
     volume: Optional[float] = None
-    remoteDataSyncedToDate: Optional[datetime] = None
 
     @field_validator("productId", "supplierId", mode="before")
     @classmethod
