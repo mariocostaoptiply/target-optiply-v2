@@ -8,6 +8,9 @@ from target_optiply.base_sink import BaseOptiplySink
 
 # In-memory cache: source inputId → Optiply id, populated by ProductsSink during the run
 _products_id_cache: Dict[str, str] = {}
+
+# In-memory cache: source inputId → Optiply id, populated by SupplierSink during the run
+_suppliers_id_cache: Dict[str, str] = {}
 from target_optiply.unified_schemas import (
     BuyOrderLineSchema,
     BuyOrderSchema,
@@ -18,6 +21,8 @@ from target_optiply.unified_schemas import (
     SupplierProductSchema,
     SupplierSchema,
 )
+
+_INVALID_EMAIL_PHRASE = "not a valid address"
 
 
 class ProductsSink(BaseOptiplySink):
@@ -59,6 +64,21 @@ class SupplierSink(BaseOptiplySink):
 
     def get_mandatory_fields(self) -> List[str]:
         return ["name"]
+
+    def upsert_record(self, record: dict, context: dict) -> tuple:
+        record_id, success, state_updates = super().upsert_record(record, context)
+
+        # Retry without emails if Optiply rejects due to invalid email address
+        if not success and state_updates.get("error", "").lower().find(_INVALID_EMAIL_PHRASE) != -1:
+            self.logger.warning("Supplier has invalid email — retrying without emails field")
+            if "data" in record and "attributes" in record["data"]:
+                record["data"]["attributes"].pop("emails", None)
+            record_id, success, state_updates = super().upsert_record(record, context)
+
+        if success and record_id and self._stashed_external_id:
+            _suppliers_id_cache[str(self._stashed_external_id)] = str(record_id)
+
+        return record_id, success, state_updates
 
 
 class SupplierProductSink(BaseOptiplySink):
