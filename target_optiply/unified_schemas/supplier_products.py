@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Optional
 from pydantic import field_validator
 from target_optiply.unified_schemas.base import OptiplyBaseSchema
@@ -7,10 +8,10 @@ from target_optiply.unified_schemas.base import OptiplyBaseSchema
 
 class SupplierProductSchema(OptiplyBaseSchema):
 
-    # Mandatory
+    # Mandatory (enforced via get_mandatory_fields, kept Optional here so cache can fill them)
     name: str
-    productId: int
-    supplierId: int
+    productId: Optional[str] = None
+    supplierId: Optional[str] = None
 
     # Optional
     skuCode: Optional[str] = None
@@ -27,8 +28,19 @@ class SupplierProductSchema(OptiplyBaseSchema):
     freeStock: Optional[int] = None
     weight: Optional[float] = None
     volume: Optional[float] = None
+    remoteDataSyncedToDate: Optional[datetime] = None
 
-    @field_validator("productId", "supplierId", "deliveryTime", "freeStock", mode="before")
+    @field_validator("productId", "supplierId", mode="before")
+    @classmethod
+    def coerce_id_str(cls, v):
+        if v is not None:
+            try:
+                return str(int(float(v)))
+            except (ValueError, TypeError):
+                return None
+        return v
+
+    @field_validator("deliveryTime", "freeStock", mode="before")
     @classmethod
     def coerce_int(cls, v):
         if v is not None:
@@ -61,11 +73,10 @@ class SupplierProductSchema(OptiplyBaseSchema):
 
     @field_validator("weight", "volume", mode="before")
     @classmethod
-    def coerce_float_precision(cls, v):
+    def coerce_float(cls, v):
         if v is not None:
             try:
-                val = float(v)
-                return round(val, 6) if abs(val) < 0.001 and val != 0 else round(val, 2)
+                return round(float(v), 2)
             except (ValueError, TypeError):
                 return None
         return v
@@ -90,5 +101,5 @@ class SupplierProductSchema(OptiplyBaseSchema):
                 return "enabled"
             elif s in ["disabled", "inactive", "false", "0"]:
                 return "disabled"
-            return "enabled"
+            return None
         return v
