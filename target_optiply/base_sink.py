@@ -145,16 +145,11 @@ class BaseOptiplySink(OptiplySink):
                     return record_id, True, {"_action": "delete"}
                 self.logger.error(f"Request failed with status 404: {error_details}")
                 return None, False, {"error": error_details}
-            elif response.status_code >= 500 and http_method in ("POST", "PATCH"):
-                error_details = self._get_error_message(response.text, response.status_code, response.url)
-                self.logger.error(f"Request failed with status {response.status_code}: {error_details}")
-                self._last_was_fatal = True
-                BaseOptiplySink._job_healthy = False
-                return None, False, {"error": error_details}
             elif response.status_code >= 400 and http_method in ("POST", "PATCH"):
                 error_details = self._get_error_message(response.text, response.status_code, response.url)
                 self.logger.error(f"Request failed with status {response.status_code}: {error_details}")
                 self._last_was_fatal = True
+                BaseOptiplySink._job_healthy = False
                 return None, False, {"error": error_details}
             elif response.status_code >= 400:
                 error_details = self._get_error_message(response.text, response.status_code, response.url)
