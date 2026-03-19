@@ -17,6 +17,8 @@ from target_optiply.client import OptiplySink
 
 logger = logging.getLogger(__name__)
 
+_products_id_cache: Dict[str, str] = {}
+
 _FIELD_ALIASES = {
     "optiply_id": "id",
     "remoteId": "externalId",
@@ -199,12 +201,13 @@ class BaseOptiplySink(OptiplySink):
         for item in json.loads(raw):
             subtotal = float(item["subtotalValue"])
             total_value += subtotal
+            product_id = item.get("productId") or _products_id_cache.get(str(item.get("Remote_productId", "")))
             line = {
                 "type": line_type,
                 "attributes": {
                     "quantity": item["quantity"],
                     "subtotalValue": str(subtotal),
-                    "productId": item["productId"],
+                    "productId": product_id,
                 },
             }
             if "expectedDeliveryDate" in item:

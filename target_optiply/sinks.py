@@ -4,10 +4,7 @@ from __future__ import annotations
 
 from typing import Dict, List
 
-from target_optiply.base_sink import BaseOptiplySink
-
-# In-memory cache: source inputId → Optiply id, populated by ProductsSink during the run
-_products_id_cache: Dict[str, str] = {}
+from target_optiply.base_sink import BaseOptiplySink, _products_id_cache
 
 # In-memory cache: source inputId → Optiply id, populated by SupplierSink during the run
 _suppliers_id_cache: Dict[str, str] = {}
