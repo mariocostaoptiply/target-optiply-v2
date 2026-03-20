@@ -204,15 +204,12 @@ class BaseOptiplySink(OptiplySink):
             total_value += subtotal
             product_id = item.get("productId") or _products_id_cache.get(str(item.get("Remote_productId", "")))
             line = {
-                "type": line_type,
-                "attributes": {
-                    "quantity": item["quantity"],
-                    "subtotalValue": str(subtotal),
-                    "productId": product_id,
-                },
+                "quantity": int(item["quantity"]),
+                "subtotalValue": round(subtotal, 2),
+                "productId": product_id,
             }
             if "expectedDeliveryDate" in item:
-                line["attributes"]["expectedDeliveryDate"] = item["expectedDeliveryDate"]
+                line["expectedDeliveryDate"] = item["expectedDeliveryDate"]
             order_lines.append(line)
 
         return total_value, order_lines

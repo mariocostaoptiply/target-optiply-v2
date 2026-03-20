@@ -52,7 +52,7 @@ class TestParseLineItems:
         ])
         total, lines = sink._parse_line_items({"line_items": raw}, "sellOrderLines")
         assert total == 10.0
-        assert lines[0]["attributes"]["productId"] == "999"
+        assert lines[0]["productId"] == "999"
 
     def test_product_id_resolved_from_cache(self):
         sink = _make_sink()
@@ -62,7 +62,7 @@ class TestParseLineItems:
         ])
         try:
             total, lines = sink._parse_line_items({"line_items": raw}, "sellOrderLines")
-            assert lines[0]["attributes"]["productId"] == "optiply-999"
+            assert lines[0]["productId"] == "optiply-999"
         finally:
             base_sink_module._products_id_cache.pop("src-42", None)
 
@@ -75,7 +75,7 @@ class TestParseLineItems:
         ])
         total, lines = sink._parse_line_items({"line_items": raw}, "sellOrderLines")
         # productId ends up None — Optiply will reject, but we don't silently drop the line
-        assert lines[0]["attributes"]["productId"] is None
+        assert lines[0]["productId"] is None
 
     def test_total_value_summed_correctly(self):
         sink = _make_sink()
@@ -172,6 +172,6 @@ class TestSellOrderSinkPreprocess:
         try:
             payload = sink.preprocess_record(record, {})
             order_lines = payload["data"]["attributes"]["orderLines"]
-            assert order_lines[0]["attributes"]["productId"] == "optiply-777"
+            assert order_lines[0]["productId"] == "optiply-777"
         finally:
             base_sink_module._products_id_cache.pop("remote-p1", None)
