@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 from datetime import datetime
 from decimal import Decimal
@@ -201,6 +202,9 @@ class BaseOptiplySink(OptiplySink):
         order_lines = []
         for item in json.loads(raw):
             subtotal = float(item["subtotalValue"])
+            if not math.isfinite(subtotal):
+                self.logger.warning(f"Skipping line item with non-finite subtotalValue: {item.get('Remote_productId')}")
+                continue
             total_value += subtotal
             product_id = item.get("productId") or _products_id_cache.get(str(item.get("Remote_productId", "")))
             line = {
