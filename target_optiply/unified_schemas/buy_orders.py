@@ -21,6 +21,16 @@ class BuyOrderSchema(OptiplyBaseSchema):
     assembly: Optional[bool] = None
     line_items: Optional[str] = Field(default=None, exclude=True)  # parsed into orderLines in sink, never sent to API
 
+    @field_validator("totalValue", mode="before")
+    @classmethod
+    def coerce_total_value(cls, v):
+        if v is not None:
+            try:
+                return str(round(float(v), 2))
+            except (ValueError, TypeError):
+                return None
+        return v
+
     @field_validator("supplierId", "accountId", mode="before")
     @classmethod
     def coerce_int(cls, v):

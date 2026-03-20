@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from typing import Optional
-from pydantic import Field
+from pydantic import Field, field_validator
 from target_optiply.unified_schemas.base import OptiplyBaseSchema
 
 
@@ -16,3 +16,13 @@ class SellOrderSchema(OptiplyBaseSchema):
     # Optional
     completed: Optional[str] = None
     line_items: Optional[str] = Field(default=None, exclude=True)  # parsed into orderLines in sink, never sent to API
+
+    @field_validator("totalValue", mode="before")
+    @classmethod
+    def coerce_total_value(cls, v):
+        if v is not None:
+            try:
+                return str(round(float(v), 2))
+            except (ValueError, TypeError):
+                return None
+        return v

@@ -60,8 +60,9 @@ class BaseOptiplySink(OptiplySink):
                 validated = self.unified_schema.model_validate(record, strict=False)
                 attributes = validated.model_dump(mode="json", exclude_none=True)
             except Exception as e:
-                self.logger.warning(f"Schema validation warning for {self.stream_name}: {e}")
-                attributes = self.build_attributes(record, self.field_mappings)
+                self.logger.error(f"Schema validation failed for {self.stream_name}: {e}")
+                BaseOptiplySink._job_healthy = False
+                raise FatalAPIError(f"Schema validation failed for {self.stream_name}: {e}")
         else:
             attributes = self.build_attributes(record, self.field_mappings)
 
