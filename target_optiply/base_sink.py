@@ -202,11 +202,12 @@ class BaseOptiplySink(OptiplySink):
         order_lines = []
         for item in json.loads(raw):
             subtotal = float(item["subtotalValue"])
-            if not math.isfinite(subtotal):
-                self.logger.warning(f"Skipping line item with non-finite subtotalValue: {item.get('Remote_productId')}")
-                continue
             total_value += subtotal
-            product_id = item.get("productId") or _products_id_cache.get(str(item.get("Remote_productId", "")))
+            raw_product_id = item.get("productId")
+            # float NaN is truthy — normalise to None so cache fallback works
+            if isinstance(raw_product_id, float) and not math.isfinite(raw_product_id):
+                raw_product_id = None
+            product_id = raw_product_id or _products_id_cache.get(str(item.get("Remote_productId", "")))
             line = {
                 "quantity": int(item["quantity"]),
                 "subtotalValue": round(subtotal, 2),
