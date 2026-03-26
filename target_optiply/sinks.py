@@ -107,13 +107,15 @@ class SupplierProductSink(BaseOptiplySink):
         remote_product = record.get("Remote_productId")
         remote_supplier = record.get("Remote_supplierId")
 
-        product_id = (
-            _products_id_cache.get(str(remote_product)) if remote_product else None
-        ) or record.get("productId")
+        product_id = self._normalize_id(
+            (_products_id_cache.get(str(remote_product)) if remote_product else None)
+            or self._normalize_id(record.get("productId"))
+        )
 
-        supplier_id = (
-            _suppliers_id_cache.get(str(remote_supplier)) if remote_supplier else None
-        ) or record.get("supplierId")
+        supplier_id = self._normalize_id(
+            (_suppliers_id_cache.get(str(remote_supplier)) if remote_supplier else None)
+            or self._normalize_id(record.get("supplierId"))
+        )
 
         if not product_id or not supplier_id:
             self.logger.warning(
@@ -308,13 +310,15 @@ class ProductCompositionSink(BaseOptiplySink):
         remote_composed = record.get("Remote_composedProductId")
         remote_part = record.get("Remote_partProductId")
 
-        composed_id = (
-            _products_id_cache.get(str(remote_composed)) if remote_composed else None
-        ) or record.get("composedProductId")
+        composed_id = self._normalize_id(
+            (_products_id_cache.get(str(remote_composed)) if remote_composed else None)
+            or self._normalize_id(record.get("composedProductId"))
+        )
 
-        part_id = (
-            _products_id_cache.get(str(remote_part)) if remote_part else None
-        ) or record.get("partProductId")
+        part_id = self._normalize_id(
+            (_products_id_cache.get(str(remote_part)) if remote_part else None)
+            or self._normalize_id(record.get("partProductId"))
+        )
 
         if not composed_id or not part_id:
             self.logger.warning(

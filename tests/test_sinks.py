@@ -12,7 +12,7 @@ from singer_sdk.exceptions import FatalAPIError
 import target_optiply.base_sink as base_sink_module
 import target_optiply.sinks as sinks_module
 from target_optiply.base_sink import BaseOptiplySink, _products_id_cache
-from target_optiply.sinks import BuyOrderLineSink, BuyOrderSink, ReceiptLineSink, SellOrderSink
+from target_optiply.sinks import BuyOrderLineSink, BuyOrderSink, ReceiptLineSink, SellOrderSink, SupplierProductSink
 
 
 # ---------------------------------------------------------------------------
@@ -566,6 +566,100 @@ class TestJobHealthyPropagation:
         assert "Skipped" in state["error"]
 
         BaseOptiplySink._job_healthy = True
+
+
+# ---------------------------------------------------------------------------
+# Helpers — SupplierProducts
+# ---------------------------------------------------------------------------
+
+class _TestSupplierProductSink(SupplierProductSink):
+    config = {}  # type: ignore[assignment]
+
+
+def _make_supplier_product_sink() -> _TestSupplierProductSink:
+    sink = _TestSupplierProductSink.__new__(_TestSupplierProductSink)
+    sink.__dict__.update({
+        "logger": logging.getLogger("test"),
+        "stream_name": "SupplierProducts",
+        "endpoint": "supplierProducts",
+        "_stashed_external_id": "10304947|4071",
+        "_record_count": 0,
+        "_record_total": None,
+        "_last_was_fatal": False,
+        "_last_response_status": None,
+    })
+    return sink
+
+
+# ---------------------------------------------------------------------------
+# SupplierProducts — NaN / invalid ID normalisation
+# ---------------------------------------------------------------------------
+
+class TestSupplierProductNaNHandling:
+
+    def test_nan_string_product_id_from_record_treated_as_missing(self):
+        """productId='nan' in raw record must not reach the payload — regression for 500 error."""
+        sink = _make_supplier_product_sink()
+        base_sink_module._products_id_cache.pop("10304947", None)
+        sinks_module._suppliers_id_cache.pop("4071", None)
+        record = {
+            "name": "Complete Kitesurfing Set",
+            "Remote_productId": "10304947",
+            "Remote_supplierId": "4071",
+            "productId": "nan",
+            "supplierId": "723287",
+            "price": 100.0,
+        }
+        payload = sink.preprocess_record(record, {})
+        assert "productId" not in payload["data"]["attributes"]
+
+    def test_float_nan_product_id_from_record_treated_as_missing(self):
+        """productId=float('nan') in raw record must not reach the payload."""
+        sink = _make_supplier_product_sink()
+        import math
+        base_sink_module._products_id_cache.pop("10304947", None)
+        record = {
+            "name": "Complete Kitesurfing Set",
+            "Remote_productId": "10304947",
+            "supplierId": "723287",
+            "productId": float("nan"),
+        }
+        payload = sink.preprocess_record(record, {})
+        assert "productId" not in payload["data"]["attributes"]
+
+    def test_nan_string_supplier_id_from_record_treated_as_missing(self):
+        """supplierId='nan' in raw record must not reach the payload."""
+        sink = _make_supplier_product_sink()
+        sinks_module._suppliers_id_cache.pop("4071", None)
+        record = {
+            "name": "Complete Kitesurfing Set",
+            "Remote_supplierId": "4071",
+            "productId": "23761424",
+            "supplierId": "nan",
+        }
+        payload = sink.preprocess_record(record, {})
+        assert "supplierId" not in payload["data"]["attributes"]
+
+    def test_cache_hit_overrides_nan_record_value(self):
+        """Even if record has productId='nan', a cache hit produces a valid ID."""
+        sink = _make_supplier_product_sink()
+        base_sink_module._products_id_cache["10304947"] = "23761424"
+        sinks_module._suppliers_id_cache["4071"] = "723287"
+        record = {
+            "name": "Complete Kitesurfing Set",
+            "Remote_productId": "10304947",
+            "Remote_supplierId": "4071",
+            "productId": "nan",
+            "supplierId": "nan",
+        }
+        try:
+            payload = sink.preprocess_record(record, {})
+            attrs = payload["data"]["attributes"]
+            assert attrs["productId"] == "23761424"
+            assert attrs["supplierId"] == "723287"
+        finally:
+            base_sink_module._products_id_cache.pop("10304947", None)
+            sinks_module._suppliers_id_cache.pop("4071", None)
 
 
 # ---------------------------------------------------------------------------

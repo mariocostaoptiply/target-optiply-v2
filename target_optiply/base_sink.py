@@ -187,6 +187,17 @@ class BaseOptiplySink(OptiplySink):
             self.logger.error(error_msg)
             return None, False, {"error": error_msg}
 
+    @staticmethod
+    def _normalize_id(v):
+        """Return None if v is NaN, infinite, empty, or a 'nan'/'none' string — guards raw record fallbacks."""
+        if v is None:
+            return None
+        if isinstance(v, float) and not math.isfinite(v):
+            return None
+        if isinstance(v, str) and v.strip().lower() in ("nan", "none", ""):
+            return None
+        return v
+
     def build_attributes(self, record: Dict, field_mappings: Dict[str, str]) -> Dict:
         attributes = {}
         for record_field, api_field in field_mappings.items():
