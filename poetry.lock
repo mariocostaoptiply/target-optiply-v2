@@ -1372,7 +1372,7 @@ singer-sdk = "^0.9.0"
 
 [package.source]
 type = "git"
-url = "ssh://git@gitlab.com/hotglue/target-hotglue-sdk.git"
+url = "https://gitlab.com/hotglue/target-hotglue-sdk.git"
 reference = "HEAD"
 resolved_reference = "359540b97f963ed4f84f68d2f3de8446d819882b"
 
@@ -1469,4 +1469,4 @@ s3 = []
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.9,<3.11"
-content-hash = "0144b99695fa62bd5189ccfac3ca3e5b4632df68583a6d6835a4969cc3d5cabf"
+content-hash = "b0580b62955e146b08724dd6538c0da255240e85fde093e6723e4384052af7c0"

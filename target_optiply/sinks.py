@@ -11,6 +11,9 @@ _suppliers_id_cache: Dict[str, str] = {}
 
 # In-memory cache: source inputId → Optiply id, populated by SupplierProductSink during the run
 _supplier_products_id_cache: Dict[str, str] = {}
+
+# In-memory cache: source inputId → Optiply id, populated by BuyOrderSink during the run
+_buy_orders_id_cache: Dict[str, str] = {}
 from target_optiply.unified_schemas import (
     BuyOrderLineSchema,
     BuyOrderSchema,
@@ -175,7 +178,30 @@ class BuyOrderSink(BaseOptiplySink):
     def get_mandatory_fields(self) -> List[str]:
         return ["placed", "totalValue", "supplierId", "accountId"]
 
+    def upsert_record(self, record: dict, context: dict) -> tuple:
+        record_id, success, state_updates = super().upsert_record(record, context)
+        if success and record_id and self._stashed_external_id:
+            _buy_orders_id_cache[str(self._stashed_external_id)] = str(record_id)
+        return record_id, success, state_updates
+
     def _add_additional_attributes(self, record: Dict, attributes: Dict) -> None:
+        remote_supplier = record.get("Remote_supplierId")
+        supplier_id = (
+            _suppliers_id_cache.get(str(remote_supplier)) if remote_supplier else None
+        ) or attributes.get("supplierId")
+        if supplier_id is not None:
+            try:
+                attributes["supplierId"] = int(float(str(supplier_id)))
+            except (ValueError, TypeError):
+                pass
+
+        account_id = self.config.get("account_id")
+        if account_id is not None:
+            try:
+                attributes["accountId"] = int(account_id)
+            except (ValueError, TypeError):
+                pass
+
         total_value, order_lines = self._parse_line_items(record, "buyOrderLines")
         if order_lines:
             attributes["totalValue"] = str(total_value)
@@ -195,6 +221,27 @@ class BuyOrderLineSink(BaseOptiplySink):
 
     def get_mandatory_fields(self) -> List[str]:
         return ["subtotalValue", "productId", "quantity", "buyOrderId"]
+
+    def _add_additional_attributes(self, record: Dict, attributes: Dict) -> None:
+        remote_product = record.get("Remote_productId")
+        product_id = (
+            _products_id_cache.get(str(remote_product)) if remote_product else None
+        ) or attributes.get("productId")
+        if product_id is not None:
+            try:
+                attributes["productId"] = int(float(str(product_id)))
+            except (ValueError, TypeError):
+                pass
+
+        remote_buy_order = record.get("Remote_buyOrderId")
+        buy_order_id = (
+            _buy_orders_id_cache.get(str(remote_buy_order)) if remote_buy_order else None
+        ) or attributes.get("buyOrderId")
+        if buy_order_id is not None:
+            try:
+                attributes["buyOrderId"] = int(float(str(buy_order_id)))
+            except (ValueError, TypeError):
+                pass
 
 
 class SellOrderSink(BaseOptiplySink):

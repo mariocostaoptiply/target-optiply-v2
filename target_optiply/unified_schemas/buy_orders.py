@@ -9,8 +9,8 @@ class BuyOrderSchema(OptiplyBaseSchema):
 
     # Mandatory
     placed: str
-    supplierId: int
-    accountId: int
+    supplierId: Optional[int] = None  # Optional here — cache can fill it via Remote_supplierId
+    accountId: Optional[int] = None  # Optional here — injected from config in _add_additional_attributes
 
     # totalValue is optional here — computed from line_items in _add_additional_attributes if present
     totalValue: Optional[str] = None
