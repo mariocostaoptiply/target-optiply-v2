@@ -10,7 +10,7 @@ class BuyOrderLineSchema(OptiplyBaseSchema):
     # Mandatory (enforced via get_mandatory_fields; Optional here so cache can fill them)
     subtotalValue: Optional[str] = None
     productId: Optional[int] = None
-    quantity: Optional[float] = None
+    quantity: Optional[int] = None
     buyOrderId: Optional[int] = None
 
     # Optional
@@ -38,10 +38,10 @@ class BuyOrderLineSchema(OptiplyBaseSchema):
 
     @field_validator("quantity", mode="before")
     @classmethod
-    def coerce_float(cls, v):
+    def coerce_quantity(cls, v):
         if v is not None:
             try:
-                return float(v)
+                return int(float(v))
             except (ValueError, TypeError):
                 return None
         return v

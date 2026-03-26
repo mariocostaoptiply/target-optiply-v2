@@ -10,7 +10,7 @@ class SellOrderLineSchema(OptiplyBaseSchema):
     # Mandatory
     subtotalValue: str
     productId: int
-    quantity: float
+    quantity: int
     sellOrderId: int
 
     @field_validator("productId", "sellOrderId", mode="before")
@@ -25,10 +25,10 @@ class SellOrderLineSchema(OptiplyBaseSchema):
 
     @field_validator("quantity", mode="before")
     @classmethod
-    def coerce_float(cls, v):
+    def coerce_quantity(cls, v):
         if v is not None:
             try:
-                return float(v)
+                return int(float(v))
             except (ValueError, TypeError):
                 return None
         return v
