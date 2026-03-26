@@ -36,6 +36,7 @@ class BaseOptiplySink(OptiplySink):
     unified_schema: Optional[Type[BaseModel]] = None
     _job_healthy: bool = True  # class-level flag; False skips all remaining records across all sinks
     _job_unhealthy_reason: str = ""  # stores the error that caused the job to be marked unhealthy
+    _job_unhealthy_logged_streams: set = set()  # tracks which streams have already logged the skip warning
 
     def __init__(self, target: PluginBase, stream_name: str, schema: Dict, key_properties: List[str]):
         super().__init__(target, stream_name, schema, key_properties)
@@ -92,7 +93,11 @@ class BaseOptiplySink(OptiplySink):
         """Process the record and return (id, success, state_updates)."""
         if not BaseOptiplySink._job_healthy:
             reason = BaseOptiplySink._job_unhealthy_reason or "unknown error"
-            self.logger.warning(f"{self.stream_name} record skipped — job marked unhealthy: {reason}")
+            if self.stream_name not in BaseOptiplySink._job_unhealthy_logged_streams:
+                self.logger.warning(f"{self.stream_name}: skipping all remaining records — job marked unhealthy: {reason}")
+                BaseOptiplySink._job_unhealthy_logged_streams.add(self.stream_name)
+            else:
+                self.logger.debug(f"{self.stream_name} record skipped — job unhealthy")
             return None, False, {"error": f"Skipped — job marked unhealthy: {reason}"}
 
         # externalId is double-popped by the SDK; stashed in process_record override
