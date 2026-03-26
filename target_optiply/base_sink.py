@@ -137,8 +137,8 @@ class BaseOptiplySink(OptiplySink):
                 ]
                 if missing_fields:
                     error_msg = f"Record skipped due to missing mandatory fields: {', '.join(missing_fields)}"
-                    self.logger.error(error_msg)
-                    return None, False, {"error": error_msg}
+                    self.logger.warning(error_msg)
+                    return None, True, {"existing": True, "error": error_msg}
 
             endpoint = f"{self.endpoint}/{record_id}" if record_id else self.endpoint
             request_data = None if http_method == "DELETE" else record

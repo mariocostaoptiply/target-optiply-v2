@@ -156,7 +156,7 @@ class SupplierProductSink(BaseOptiplySink):
                         existing_id = items[0].get("id")
                         if existing_id and self._stashed_external_id:
                             _supplier_products_id_cache[str(self._stashed_external_id)] = str(existing_id)
-                        return existing_id, True, {"_action": "upsert"}
+                        return existing_id, True, {"existing": True}
 
         # PATCH 404: resource gone — re-POST
         if not success and self._last_response_status == 404:
