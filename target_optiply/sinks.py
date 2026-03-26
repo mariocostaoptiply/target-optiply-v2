@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Dict, List
 
 from target_optiply.base_sink import BaseOptiplySink, _products_id_cache
@@ -14,11 +15,15 @@ _supplier_products_id_cache: Dict[str, str] = {}
 
 # In-memory cache: source inputId → Optiply id, populated by BuyOrderSink during the run
 _buy_orders_id_cache: Dict[str, str] = {}
+
+# In-memory cache: source inputId → Optiply id, populated by BuyOrderLineSink during the run
+_buy_order_lines_id_cache: Dict[str, str] = {}
 from target_optiply.unified_schemas import (
     BuyOrderLineSchema,
     BuyOrderSchema,
     ProductCompositionSchema,
     ProductSchema,
+    ReceiptLineSchema,
     SellOrderLineSchema,
     SellOrderSchema,
     SupplierProductSchema,
@@ -243,6 +248,12 @@ class BuyOrderLineSink(BaseOptiplySink):
             except (ValueError, TypeError):
                 pass
 
+    def upsert_record(self, record: dict, context: dict) -> tuple:
+        record_id, success, state_updates = super().upsert_record(record, context)
+        if success and record_id and self._stashed_external_id:
+            _buy_order_lines_id_cache[str(self._stashed_external_id)] = str(record_id)
+        return record_id, success, state_updates
+
 
 class SellOrderSink(BaseOptiplySink):
     """Sell orders sink."""
@@ -317,3 +328,32 @@ class ProductCompositionSink(BaseOptiplySink):
 
         attributes["composedProductId"] = composed_id
         attributes["partProductId"] = part_id
+
+
+class ReceiptLineSink(BaseOptiplySink):
+    """Receipt lines sink."""
+
+    endpoint = "receiptLines"
+    unified_schema = ReceiptLineSchema
+
+    @property
+    def name(self) -> str:
+        return "ReceiptLines"
+
+    def get_mandatory_fields(self) -> List[str]:
+        return ["occurred", "quantity", "buyOrderLineId"]
+
+    def _add_additional_attributes(self, record: Dict, attributes: Dict) -> None:
+        remote_bol = record.get("Remote_buyOrderLineId")
+        buy_order_line_id = (
+            _buy_order_lines_id_cache.get(str(remote_bol)) if remote_bol else None
+        ) or attributes.get("buyOrderLineId")
+        if buy_order_line_id is not None:
+            attributes["buyOrderLineId"] = str(buy_order_line_id)
+
+        # remoteId is aliased to externalId by _FIELD_ALIASES; restore it for the Optiply payload
+        remote_id = record.get("externalId") or self._stashed_external_id
+        if remote_id:
+            attributes["remoteId"] = str(remote_id)
+
+        attributes["remoteDataSyncedToDate"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")

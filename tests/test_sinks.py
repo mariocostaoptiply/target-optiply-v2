@@ -12,7 +12,7 @@ from singer_sdk.exceptions import FatalAPIError
 import target_optiply.base_sink as base_sink_module
 import target_optiply.sinks as sinks_module
 from target_optiply.base_sink import BaseOptiplySink, _products_id_cache
-from target_optiply.sinks import BuyOrderLineSink, BuyOrderSink, SellOrderSink
+from target_optiply.sinks import BuyOrderLineSink, BuyOrderSink, ReceiptLineSink, SellOrderSink
 
 
 # ---------------------------------------------------------------------------
@@ -565,4 +565,181 @@ class TestJobHealthyPropagation:
         assert success is False
         assert "Skipped" in state["error"]
 
+        BaseOptiplySink._job_healthy = True
+
+
+# ---------------------------------------------------------------------------
+# Helpers — ReceiptLines
+# ---------------------------------------------------------------------------
+
+class _TestReceiptLineSink(ReceiptLineSink):
+    config = {}  # type: ignore[assignment]
+
+
+def _make_receipt_line_sink() -> _TestReceiptLineSink:
+    sink = _TestReceiptLineSink.__new__(_TestReceiptLineSink)
+    sink.__dict__.update({
+        "logger": logging.getLogger("test"),
+        "stream_name": "ReceiptLines",
+        "endpoint": "receiptLines",
+        "_stashed_external_id": None,
+        "_record_count": 0,
+        "_record_total": None,
+        "_last_was_fatal": False,
+        "_last_response_status": None,
+    })
+    return sink
+
+
+# ---------------------------------------------------------------------------
+# preprocess_record — ReceiptLineSink
+# ---------------------------------------------------------------------------
+
+class TestReceiptLineSinkPreprocess:
+
+    def test_buy_order_line_id_from_record(self):
+        """buyOrderLineId provided directly — no cache needed."""
+        sink = _make_receipt_line_sink()
+        sinks_module._buy_order_lines_id_cache.pop("remote-bol1", None)
+        record = {
+            "occurred": "2024-01-15T10:00:00Z",
+            "quantity": 5,
+            "buyOrderLineId": "987654",
+        }
+        payload = sink.preprocess_record(record, {})
+        assert payload["data"]["attributes"]["buyOrderLineId"] == "987654"
+
+    def test_buy_order_line_id_from_cache(self):
+        """Remote_buyOrderLineId resolves from _buy_order_lines_id_cache — new BOL posted this run."""
+        sink = _make_receipt_line_sink()
+        sinks_module._buy_order_lines_id_cache["remote-bol1"] = "987654"
+        record = {
+            "occurred": "2024-01-15T10:00:00Z",
+            "quantity": 5,
+            "Remote_buyOrderLineId": "remote-bol1",
+        }
+        try:
+            payload = sink.preprocess_record(record, {})
+            assert payload["data"]["attributes"]["buyOrderLineId"] == "987654"
+        finally:
+            sinks_module._buy_order_lines_id_cache.pop("remote-bol1", None)
+
+    def test_buy_order_line_id_cache_takes_priority_over_record(self):
+        """Cache value wins over buyOrderLineId already in record."""
+        sink = _make_receipt_line_sink()
+        sinks_module._buy_order_lines_id_cache["remote-bol1"] = "999999"
+        record = {
+            "occurred": "2024-01-15T10:00:00Z",
+            "quantity": 5,
+            "buyOrderLineId": "111111",
+            "Remote_buyOrderLineId": "remote-bol1",
+        }
+        try:
+            payload = sink.preprocess_record(record, {})
+            assert payload["data"]["attributes"]["buyOrderLineId"] == "999999"
+        finally:
+            sinks_module._buy_order_lines_id_cache.pop("remote-bol1", None)
+
+    def test_buy_order_line_id_missing_not_in_cache(self):
+        """Neither buyOrderLineId nor Remote_buyOrderLineId in cache — field absent from payload."""
+        sink = _make_receipt_line_sink()
+        sinks_module._buy_order_lines_id_cache.pop("unknown-bol", None)
+        record = {
+            "occurred": "2024-01-15T10:00:00Z",
+            "quantity": 5,
+            "Remote_buyOrderLineId": "unknown-bol",
+        }
+        payload = sink.preprocess_record(record, {})
+        assert "buyOrderLineId" not in payload["data"]["attributes"]
+
+    def test_remote_data_synced_to_date_always_injected(self):
+        """remoteDataSyncedToDate is always set to current UTC time by the target."""
+        sink = _make_receipt_line_sink()
+        record = {
+            "occurred": "2024-01-15T10:00:00Z",
+            "quantity": 5,
+            "buyOrderLineId": "987654",
+        }
+        payload = sink.preprocess_record(record, {})
+        assert "remoteDataSyncedToDate" in payload["data"]["attributes"]
+        ts = payload["data"]["attributes"]["remoteDataSyncedToDate"]
+        assert ts.endswith("Z")
+        assert "T" in ts
+
+    def test_remote_data_synced_to_date_overrides_record_value(self):
+        """Even if remoteDataSyncedToDate is in the record, target always injects current time."""
+        sink = _make_receipt_line_sink()
+        record = {
+            "occurred": "2024-01-15T10:00:00Z",
+            "quantity": 5,
+            "buyOrderLineId": "987654",
+            "remoteDataSyncedToDate": "2020-01-01T00:00:00Z",
+        }
+        payload = sink.preprocess_record(record, {})
+        assert payload["data"]["attributes"]["remoteDataSyncedToDate"] != "2020-01-01T00:00:00Z"
+
+    def test_occurred_string_passthrough(self):
+        sink = _make_receipt_line_sink()
+        record = {
+            "occurred": "2024-06-15T08:30:00Z",
+            "quantity": 3,
+            "buyOrderLineId": "987654",
+        }
+        payload = sink.preprocess_record(record, {})
+        assert payload["data"]["attributes"]["occurred"] == "2024-06-15T08:30:00Z"
+
+    def test_quantity_string_coerced_to_int(self):
+        sink = _make_receipt_line_sink()
+        record = {
+            "occurred": "2024-01-15T10:00:00Z",
+            "quantity": "7",
+            "buyOrderLineId": "987654",
+        }
+        payload = sink.preprocess_record(record, {})
+        assert payload["data"]["attributes"]["quantity"] == 7
+
+    def test_remote_id_optional(self):
+        sink = _make_receipt_line_sink()
+        record = {
+            "occurred": "2024-01-15T10:00:00Z",
+            "quantity": 5,
+            "buyOrderLineId": "987654",
+            "remoteId": "RL-001",
+        }
+        payload = sink.preprocess_record(record, {})
+        assert payload["data"]["attributes"]["remoteId"] == "RL-001"
+
+    def test_optiply_id_becomes_payload_id(self):
+        sink = _make_receipt_line_sink()
+        record = {
+            "optiply_id": "777",
+            "occurred": "2024-01-15T10:00:00Z",
+            "quantity": 5,
+            "buyOrderLineId": "987654",
+        }
+        payload = sink.preprocess_record(record, {})
+        assert payload["data"]["id"] == "777"
+
+    def test_schema_failure_raises_fatal_and_marks_unhealthy(self):
+        """Schema failure (forced) → FatalAPIError, _job_healthy = False."""
+        sink = _make_receipt_line_sink()
+        BaseOptiplySink._job_healthy = True
+        with patch.object(
+            type(sink).unified_schema,
+            "model_validate",
+            side_effect=Exception("forced failure"),
+        ):
+            with pytest.raises(FatalAPIError):
+                sink.preprocess_record({"occurred": "2024-01-15T10:00:00Z", "quantity": 5, "buyOrderLineId": "987654"}, {})
+        assert BaseOptiplySink._job_healthy is False
+        BaseOptiplySink._job_healthy = True
+
+    def test_job_unhealthy_skips_upsert(self):
+        """After _job_healthy = False, receipt line upsert is skipped without HTTP call."""
+        sink = _make_receipt_line_sink()
+        BaseOptiplySink._job_healthy = False
+        preprocessed = {"data": {"type": "receiptLines", "attributes": {}}}
+        record_id, success, state = sink.upsert_record(preprocessed, {})
+        assert success is False
+        assert "Skipped" in state["error"]
         BaseOptiplySink._job_healthy = True

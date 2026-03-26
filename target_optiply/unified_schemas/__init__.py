@@ -7,6 +7,7 @@ from target_optiply.unified_schemas.buy_order_lines import BuyOrderLineSchema
 from target_optiply.unified_schemas.sell_orders import SellOrderSchema
 from target_optiply.unified_schemas.sell_order_lines import SellOrderLineSchema
 from target_optiply.unified_schemas.product_compositions import ProductCompositionSchema
+from target_optiply.unified_schemas.receipt_lines import ReceiptLineSchema
 
 __all__ = [
     "OptiplyBaseSchema",
@@ -18,4 +19,5 @@ __all__ = [
     "SellOrderSchema",
     "SellOrderLineSchema",
     "ProductCompositionSchema",
+    "ReceiptLineSchema",
 ]
