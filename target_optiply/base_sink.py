@@ -35,6 +35,7 @@ class BaseOptiplySink(OptiplySink):
     field_mappings = {}
     unified_schema: Optional[Type[BaseModel]] = None
     _job_healthy: bool = True  # class-level flag; False skips all remaining records across all sinks
+    _job_unhealthy_reason: str = ""  # stores the error that caused the job to be marked unhealthy
 
     def __init__(self, target: PluginBase, stream_name: str, schema: Dict, key_properties: List[str]):
         super().__init__(target, stream_name, schema, key_properties)
@@ -61,9 +62,11 @@ class BaseOptiplySink(OptiplySink):
                 validated = self.unified_schema.model_validate(record, strict=False)
                 attributes = validated.model_dump(mode="json", exclude_none=True)
             except Exception as e:
-                self.logger.error(f"Schema validation failed for {self.stream_name}: {e}")
+                reason = f"{self.stream_name} schema validation failed: {e}"
+                self.logger.error(reason)
                 BaseOptiplySink._job_healthy = False
-                raise FatalAPIError(f"Schema validation failed for {self.stream_name}: {e}")
+                BaseOptiplySink._job_unhealthy_reason = reason
+                raise FatalAPIError(reason)
         else:
             attributes = self.build_attributes(record, self.field_mappings)
 
@@ -88,8 +91,9 @@ class BaseOptiplySink(OptiplySink):
     def upsert_record(self, record: dict, context: dict) -> tuple:
         """Process the record and return (id, success, state_updates)."""
         if not BaseOptiplySink._job_healthy:
-            self.logger.warning(f"{self.stream_name} record skipped — job marked unhealthy after Products failure")
-            return None, False, {"error": "Skipped — job marked unhealthy after Products failure"}
+            reason = BaseOptiplySink._job_unhealthy_reason or "unknown error"
+            self.logger.warning(f"{self.stream_name} record skipped — job marked unhealthy: {reason}")
+            return None, False, {"error": f"Skipped — job marked unhealthy: {reason}"}
 
         # externalId is double-popped by the SDK; stashed in process_record override
         external_id = record.get("externalId") or self._stashed_external_id
@@ -149,11 +153,18 @@ class BaseOptiplySink(OptiplySink):
                     return record_id, True, {"_action": "delete"}
                 self.logger.error(f"Request failed with status 404: {error_details}")
                 return None, False, {"error": error_details}
+            elif response.status_code == 409 and http_method in ("POST", "PATCH"):
+                # 409 Conflict — subclasses (e.g. SupplierProductSink) handle recovery; do not mark job unhealthy
+                error_details = self._get_error_message(response.text, response.status_code, response.url)
+                self.logger.error(f"Request failed with status 409: {error_details}")
+                self._last_response_status = response.status_code
+                return None, False, {"error": error_details}
             elif response.status_code >= 400 and http_method in ("POST", "PATCH"):
                 error_details = self._get_error_message(response.text, response.status_code, response.url)
                 self.logger.error(f"Request failed with status {response.status_code}: {error_details}")
                 self._last_was_fatal = True
                 BaseOptiplySink._job_healthy = False
+                BaseOptiplySink._job_unhealthy_reason = f"{self.stream_name} [{count_label}] {http_method} {response.status_code}: {error_details}"
                 return None, False, {"error": error_details}
             elif response.status_code >= 400:
                 error_details = self._get_error_message(response.text, response.status_code, response.url)
